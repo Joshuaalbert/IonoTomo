@@ -1,0 +1,26 @@
+{
+    "arrayFile": "arrays/gmrtPos.csv",
+    "atmosphereData": "100RandomBlobs.npz",
+    "dataFolder": "/home/albert/owncloud/RadioAstronomyThings/IonoTomo/output/0",
+    "fieldId": 2,
+    "frequency": 1427583133.3333335,
+    "layerHeights": [
+        10,
+        350,
+        1000
+    ],
+    "loadAtmosphere": true,
+    "msFile": "/net/para34/data1/albert/casa/10mar2015/10-11MAR/10mar2014.ms/",
+    "obsLength": 3.0,
+    "obsStart": "2016-06-21T00:00:00.000",
+    "pointing": [
+        -70.728728565705978,
+        -33.522219794763771
+    ],
+    "precomputed": false,
+    "restrictTimestamps": 50,
+    "sampleTime": 8.0500000000000007,
+    "skyModelFile": "skymodels/testSM.csv",
+    "wavelength": 0.20999999999999996,
+    "workingDir": "/home/albert/owncloud/RadioAstronomyThings/IonoTomo/output"
+}
