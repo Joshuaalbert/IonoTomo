@@ -23,7 +23,7 @@ def generate(msfile,outfile):
     
     i = 0
     while i < len(names):
-        f.write("{0:0.3f} {1:0.3f} {2:0.3f} {3:0.3f} {4}\n".format(position[i,0],position[i,1],position[i,2],diam[i],names[i]))
+        f.write("{0:0.3f} {1:0.3f} {2:0.3f} {3:0.3f} {4}".format(position[i,0],position[i,1],position[i,2],diam[i],names[i]))
         i += 1
     f.close()
     
