@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[16]:
+# In[1]:
 
 '''Contains geometry algorithms'''
 import numpy as np
@@ -160,6 +160,7 @@ class Plane(object):
             self.n = np.array(normal)
             self.n = self.n/np.linalg.norm(self.n)
             self.d = -self.n.dot(p1)
+        self.centroid = p1
     def __repr__(self):
         return "Plane: normal: {0}, d=-n.p {1}".format(self.n,self.d)
 ###

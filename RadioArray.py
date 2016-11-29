@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[5]:
+# In[10]:
 
 import astropy.coordinates as ac
 import astropy.units as au
@@ -89,7 +89,13 @@ def testBaselines():
 
 class RadioArray(object):
     def __init__(self,arrayFile = None,antennaPos=None,log = None,name = None,msFile=None,numAntennas=0,earthLocs=None):
-        self.log = log
+        
+        if log is None:
+            from Logger import Logger
+            logger = Logger()
+            self.log = logger.log
+        else:
+            self.log = log
         self.locs = []
         self.Nantenna = 0
         if arrayFile is not None:
@@ -145,7 +151,7 @@ class RadioArray(object):
     def calcCenter(self):
         '''calculates the centroid of the array based on self.locs returns the ITRS of center'''
         center = np.mean(self.locs.cartesian.xyz,axis=1)
-        self.center = ac.SkyCoord(x=center[0],y=center[1],z=center[2],frame='itrs')
+        self.center = ac.ITRS(x=center[0],y=center[1],z=center[2])
         self.log("Center of array: {0}".format(self.center))
         #n = self.center.itrs.earth_location.geocentric.to(au.m).value
         #self.n = n/np.sqrt(n[0]**2 + n[1]**2 + n[2]**2)
@@ -162,8 +168,7 @@ if __name__=='__main__':
     from Logger import Logger
     logger = Logger()
     radioArray = RadioArray(arrayFile='arrays/gmrtPos.csv',log=logger.log)
-    radioArray = RadioArray(arrayFile='arrays/lofar.cycle0.hba.antenna.cfg',log=logger.log)
-    
+    radioArray = RadioArray(arrayFile='arrays/lofar.hba.antenna.cfg',log=logger.log)
     #print radioArray.center.earth_location.height
     #times = at.Time([0,2,4]*au.s,format='gps',scale='utc')
     #radioArray.calcBaselines(times,np.array([12,62]))
