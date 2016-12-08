@@ -61,6 +61,7 @@ def rotAngle(R):
 # UVW coordinates
 ###
 
+
 def localENU2uvw(enu,alt,az,lat):
     '''Given a local ENU vector, rotate to uvw coordinates'''
     #first get hour angle and dec from alt az and lat
@@ -191,16 +192,18 @@ def coplanarPoints(points):
         #print ("Not enough points to test")
         return False,None
     if len(points) == 3:
-        return True, Plane(*points)
-    plane = Plane(*points[:3])
+        return True
+    ab = LineSegment(points[0],points[1])
+    ac = LineSegment(points[0],points[2])
+    axis = np.cross(ab.dir,ac.dir)
+    #mag = np.linalg.norm(axis)
     i = 3
     while i < len(points):
-        if not onPlane(plane,points[i]):
-            return False, None
+        ad = LineSegment(points[0],points[i])
+        if ad.dir.dot(axis) > epsFloat:#*mag:
+            return False
         i += 1
-    return True,plane
-
-
+    return True
 
 class BoundedPlane(Plane):
     '''assumes convex hull of 4 points'''
@@ -208,32 +211,33 @@ class BoundedPlane(Plane):
         if len(vertices) != 4:
             #print("Not enough vertices")
             return
-        res,plane = coplanarPoints(vertices)
-        if res:
-            super(BoundedPlane,self).__init__(*vertices)
-            
-            self.centroid = np.mean(vertices,axis=0)
-            #first triangle
-            edge01 = LineSegment(vertices[0],vertices[1])
-            edge12 = LineSegment(vertices[1],vertices[2])
-            edge20 = LineSegment(vertices[2],vertices[0])
-            
-            centroid1 = (vertices[0] + vertices[1] + vertices[2])/3.
-            centerDist = np.linalg.norm(centroid1 - vertices[3])
-            if np.linalg.norm(midPointLineSeg(edge01) - vertices[3]) < centerDist:
-                #reject 01
-                self.edges = [edge12,edge20,LineSegment(vertices[0],vertices[3]),
-                         LineSegment(vertices[1],vertices[3])]
-            if np.linalg.norm(midPointLineSeg(edge12) - vertices[3]) < centerDist:
-                #reject 12
-                self.edges = [edge01,edge20,LineSegment(vertices[1],vertices[3]),
-                         LineSegment(vertices[2],vertices[3])]
-            if np.linalg.norm(midPointLineSeg(edge20) - vertices[3]) < centerDist:
-                #reject 20
-                self.edges = [edge01,edge12,LineSegment(vertices[2],vertices[3]),
-                         LineSegment(vertices[0],vertices[3])]   
-        else:
-            print('not coplanar',vertices)
+        res = coplanarPoints(vertices)
+        if not res:
+            print('May not be not coplanar',vertices)
+        
+        super(BoundedPlane,self).__init__(*vertices)
+
+        self.centroid = np.mean(vertices,axis=0)
+        #first triangle
+        edge01 = LineSegment(vertices[0],vertices[1])
+        edge12 = LineSegment(vertices[1],vertices[2])
+        edge20 = LineSegment(vertices[2],vertices[0])
+
+        centroid1 = (vertices[0] + vertices[1] + vertices[2])/3.
+        centerDist = np.linalg.norm(centroid1 - vertices[3])
+        if np.linalg.norm(midPointLineSeg(edge01) - vertices[3]) < centerDist:
+            #reject 01
+            self.edges = [edge12,edge20,LineSegment(vertices[0],vertices[3]),
+                     LineSegment(vertices[1],vertices[3])]
+        if np.linalg.norm(midPointLineSeg(edge12) - vertices[3]) < centerDist:
+            #reject 12
+            self.edges = [edge01,edge20,LineSegment(vertices[1],vertices[3]),
+                     LineSegment(vertices[2],vertices[3])]
+        if np.linalg.norm(midPointLineSeg(edge20) - vertices[3]) < centerDist:
+            #reject 20
+            self.edges = [edge01,edge12,LineSegment(vertices[2],vertices[3]),
+                     LineSegment(vertices[0],vertices[3])]   
+
 
     def __repr__(self):
         return "Bounded Plane: edges: {0}, n {1}".format(self.edges,self.n)
@@ -312,6 +316,7 @@ def intersectRayPlane(ray,plane,positiveOnly = False, entryOnly=False, exitOnly=
     #make point
     c0p0 = ray.origin - plane.centroid#3a
     t = -(c0p0.dot(plane.n)/parallel)#5m 3a
+    assert not np.isnan(t),"nan intersection, {0}".format(ray)
     if positiveOnly:#1 logic
         if t < -epsFloat:#1logic, casual
             return False,None
@@ -373,6 +378,7 @@ def intersectRayBoundedPlaneHull(ray,plane,positiveOnly = False, entryOnly=False
     ''' 
     parallel = ray.dir.dot(plane.n)#3m 3a
     if parallel*parallel < epsFloat*epsFloat:#2m 1logic
+        #parallel
         return False,None
     else:
         if entryOnly:#1 logic
@@ -383,16 +389,30 @@ def intersectRayBoundedPlaneHull(ray,plane,positiveOnly = False, entryOnly=False
                 return False,None# going entry
     #make point
     c0p0 = ray.origin - plane.centroid#3a
+    #print("rayO:",ray.origin)
+    #print("planeC:",plane.centroid)
+    #print("planeN:",plane.n)
+    #print("parallel:",parallel)
+    #print("rayD:",ray.dir)
     t = -(c0p0.dot(plane.n)/parallel)#5m 3a
+    if np.isnan(t):
+        print("Error: nan intersection")
+        print("ray:",ray)
+        assert not np.isnan(t),"nan intersection, {0}".format(ray)
+        return False,None
     if positiveOnly:#1 logic
         if t < -epsFloat:#1logic, casual
             return False,None
     x = ray.origin + t*ray.dir #3m 3a
     #it hits and check boundedness
+    #print("t:",t)
     for edge in plane.edges:#x4
-        r0x = x - edge.origin#3a
-        r0c0 = plane.centroid - edge.origin#3a
-        if r0x.dot(r0c0) - r0x.dot(edge.dir)*r0c0.dot(edge.dir) < -epsFloat:#10m 13a 1logic
+        r0x = (x - edge.origin)/np.abs(t)#3a
+        r0c0 = (plane.centroid - edge.origin)/np.abs(t)#3a
+        #if r0x.dot(r0c0) - r0x.dot(edge.dir)*r0c0.dot(edge.dir) < -epsFloat:#10m 13a 1logic
+        ratio = r0x.dot(r0c0)/(r0x.dot(edge.dir)*r0c0.dot(edge.dir))
+        if ratio < 1. - epsFloat:#10m 13a 1logic
+            print(ratio)
             return False, None
     return True,x#53m 88a 7(9)logic +6 assign = 156flop
 
@@ -487,6 +507,14 @@ class Voxel(object):
         self.boundingPlanes = boundingPlanes         
     def __repr__(self):
         return "Voxel: Center {0}\nVertices:\t{2}".format(self.centroid,self.vertices)
+    
+###
+# Voxel functions
+###
+
+def centerStep(voxel,ray,step=epsFloat):
+    '''Move a ray origin towards voxel centroid to perturb'''
+    ray.origin += (voxel.centroid - ray.origin)*epsFloat
 
 ###
 # OctTree object and routines below.
@@ -521,6 +549,8 @@ class OctTree(Voxel):
 ###
 # OctTree routines
 ###
+
+
 
 def accumulateChildren(octTree):
     '''Accumulate the properties of children up through te octTree.
@@ -578,6 +608,11 @@ def getAllDecendants(octTree):
     else:
         return [octTree]
     
+def cleanRays(octTree):
+    voxels = getAllDecendants(octTree)
+    for vox in voxels:
+        vox.lineSegments = {}
+        
 def countDecendants(octTree):
     '''Count number of lowest children.
     8x longer per layer'''
@@ -620,8 +655,61 @@ def intersectRay(octTree,ray):
         i += 1
     return False, None, None
 
-def propagateRay(octTree,ray):
+def intersectRayOcttreeInner(octTree,ray):
+    '''Intersect a ray with the inside of an octtree from the inside.'''
+    hits = {}
+    #up to three possible if hitting within epsFloat of corner
+    i = 0
+    while i < 6:
+        plane = octTree.boundingPlanes[i]
+        #res,point = intersectRayBoundedPlaneHull(ray,plane,positiveOnly=True,exitOnly=True)
+        res,point = intersectRayPlane(ray,plane,positiveOnly = True, entryOnly=False, exitOnly=False)
+        if res:
+            d = ray.origin - point
+            hits[d.dot(d)] = [point,i]
+            #hits[np.abs(ray.dir.dot(plane.n))] = [point,i]
+        #if res:#ray entering from outside or on boundary, not from within
+            #print("Hit entry plane:",plane,"in vox:",self)
+        #    return True, point, i
+        i += 1
+    #print(hits)
+    if len(hits.keys()) == 1:
+        key = hits.keys()[0]
+        return True, hits[key][0],hits[key][1]
+    if len(hits.keys()) > 1:
+        key = hits.keys()[np.argmin(hits.keys())]
+        return True, hits[key][0],hits[key][1]
+    assert len(hits.keys()) != 0, "No intersections with inner surface of polygon. {0} {1}".format(ray,octTree)
+    return False, None, None
+
+def intersectRayOcttreeOuter(octTree,ray):
+    '''Intersect a ray with the outside of an octtree from the outside.'''
+    hits = {}
+    #up to three possible if hitting within epsFloat of corner
+    i = 0
+    while i < 6:
+        plane = octTree.boundingPlanes[i]
+        res,point = intersectRayBoundedPlaneHull(ray,plane,positiveOnly=True,entryOnly=True)
+        if res:
+            hits[np.abs(ray.dir.dot(plane.n))] = [point,i]
+        #if res:#ray entering from outside or on boundary, not from within
+            #print("Hit entry plane:",plane,"in vox:",self)
+        #    return True, point, i
+        i += 1
+    print(hits)
+    if len(hits.keys()) == 1:
+        key = hits.keys()[0]
+        return True, hits[key][0],hits[key][1]
+    if len(hits.keys()) > 1:
+        key = hits.keys()[np.argmax(hits.keys())]
+        return True, hits[key][0],hits[key][1]
+    assert len(hits.keys()) != 0, "No intersections with inner surface of polygon. {0}".format(hits)
+    return False, None, None
+        
+
+def propagateRayExplicit(octTree,ray):
     '''Propagate ray until it leaves polygon. Can fail if polygon has a hole in it.'''
+    centerStep(octTree,ray,step=epsFloat)
     i = 0
     while i < 6:
         plane = octTree.boundingPlanes[i]
@@ -655,11 +743,23 @@ def propagateRay(octTree,ray):
                                 distwin = dist3
                         i += 1
                 i += 1
+            
         i += 1    
     return True,pointwin,iwin
 
+def propagateRay(octTree,ray):
+    '''Propagate ray until it leaves polygon. Can fail if polygon has a hole in it.'''
+    centerStep(octTree,ray,step=epsFloat*100)
+    res,point,planeIdx = intersectRayOcttreeInner(octTree,ray)
+    return res,point,planeIdx
+    #if res:
+    #    return True,point,planeIdx
+    #else:
+    #    return False,None,None
+
 def intersectPoint(octTree,point):
-    '''Return octtree at lowest level.'''
+    '''Return octtree at lowest level.
+    Resolves choice when on boundary between children.'''
     if octTree.hasChildren:
         quad = (point[0] > octTree.centroid[0]) + 2*(point[1] > octTree.centroid[1]) + 4*(point[2] > octTree.centroid[2])
         return intersectPoint(octTree.children[quad],point)
@@ -792,6 +892,7 @@ def loadOctTree(fileName):
     
 def snellsLaw(n1,n2,ray,normal,point):
     '''Produce a ray following snells law at an interface with normal incidence pointing out.'''
+    #print(n1,n2)
     #snells law here
     axis = np.cross(-normal,ray.dir)
     sintheta1 = np.linalg.norm(axis)
@@ -801,33 +902,47 @@ def snellsLaw(n1,n2,ray,normal,point):
     #dTheta = np.arcsin(n1/n2*sintheta1) - np.arcsin(sintheta1)
     #print(dTheta)
     dir2 = rot(axis,dTheta).dot(ray.dir)
+    
     #todo
     propRay = Ray(point,dir2,id=ray.id)
     return propRay
     
 def forwardRay(ray,octTree):
     '''Propagate ray through octTree until it leaves the boundaries'''
-    #from outside to octTree
-    inside,entryPoint,entryPlaneIdx = intersectRay(octTree,ray)
-    if not inside:
-        print('failed to hit',octTree)
+    #intersect bottom plane
+    
+    
+    bottomPlane = octTree.boundingPlanes[4]
+    
+    res,entryPoint = intersectRayBoundedPlaneHull(ray,bottomPlane,positiveOnly=False,entryOnly=False,exitOnly=False)
+    if not res:
+        print("Octree bottom plane not large enough")
+        print(octTree,ray)
         return
+    ray.origin = entryPoint
+
+    #find the lowest child to propagate through
+
     vox = intersectPoint(octTree,entryPoint)
-    normal = -vox.boundingPlanes[entryPlaneIdx].n
+    incidentNormal = -bottomPlane.n
     n1 = 1
     entryRay = ray
+
+    inside = True
     while inside:
+        #prepare to do snells law
         n2 = vox.properties['n'][1]
-        
-        rayProp = snellsLaw(n1,n2,entryRay,normal,entryPoint)
+        n1=1.
+        n2=1.
+        rayProp = snellsLaw(n1,n2,entryRay,incidentNormal,entryPoint)
+        #get where it ends up
         res,exitPoint,exitPlaneIdx = propagateRay(vox,rayProp)
         if not res:
             print("something went wrong and ",rayProp," didn't exit ",vox)
             return
-
+        #add line segment
         vox.lineSegments[rayProp.id] = LineSegment(entryPoint,exitPoint)#np.linalg.norm(exitPoint-entryPoint)
 
-        #print(vox.lineSegments)
         #resolve the next vox to hit
         this = vox
         unresolved = True
@@ -835,7 +950,6 @@ def forwardRay(ray,octTree):
             if this.parent is None:
                 inside = False
                 break
-                
             nextVoxIdx = getOtherSide(this,exitPlaneIdx)
             if nextVoxIdx >= 0:#hits a sibling of this
                 nextVox = this.parent.children[nextVoxIdx]
@@ -845,7 +959,7 @@ def forwardRay(ray,octTree):
                 #    return
                 entryPoint = exitPoint
                 vox = intersectPoint(nextVox,entryPoint)
-                normal = this.boundingPlanes[exitPlaneIdx].n
+                incidentNormal = this.boundingPlanes[exitPlaneIdx].n
                 n1 = n2
                 entryRay = rayProp
                 unresolved = False
@@ -853,6 +967,12 @@ def forwardRay(ray,octTree):
             else:#nextVoxIdx is -planeIdx-1 of parent
                 this = this.parent
                 exitPlaneIdx = -(nextVoxIdx+1)
+    #topPlane = octTree.boundingPlanes[5]
+    #res,exitPoint = intersectRayBoundedPlaneHull(ray,topPlane,positiveOnly=False,entryOnly=False,exitOnly=False)
+    #if not res:
+    #    print("Octree bottom plane not large enough")
+    #    print(octTree,ray)
+    #    return
     return exitPoint,vox.boundingPlanes[exitPlaneIdx]
         
 def plotOctTreeXZ(octTree,ax=None):
@@ -989,15 +1109,12 @@ def testOtherSide():
     
 if __name__ == '__main__':    
     #testOtherSide()
-    try:
-        octTree = loadOctTree('octTree_5levels.npy')
-    except:
-        octTree = OctTree([0,0,0.5],dx=10,dy=10,dz=10)
-        subDivideToDepth(octTree,5)
-        saveOctTree('octTree_5levels.npy',octTree)
-    for i in range(20):
-        ray = Ray(np.array([0,0,-epsFloat]),np.random.uniform(low=0,high=1,size=3),id=i)
-        forwardRay(ray,octTree)
+
+    octTree = OctTree([0,0,0.5],dx=1,dy=1,dz=1)
+    subDivide(octTree)
+    #saveOctTree('octTree_5levels.npy',octTree)
+    ray = Ray(np.array([-0.5,-0.5,0]),np.array([1,1,1]),id=0)
+    forwardRay(ray,octTree)
     plotOctTreeYZ(octTree,ax=None)
     
 

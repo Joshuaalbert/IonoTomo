@@ -9,8 +9,13 @@ import numpy as np
 import os
 #os.environ['ETS_TOOLKIT'] = 'qt4'
 #os.environ['QT_API'] = 'pyqt'
-import mayavi
-import mayavi.mlab
+from PlotOctTree import mayaviPlot,plotOctTree
+import astropy.units as au
+import astropy.time as at
+import astropy.coordinates as ac
+from ENUFrame import ENU
+
+import FermatPrinciple as fp
     
 def generateModelFromOctree(octTree,numRays):
     '''Generate model '''
@@ -26,7 +31,8 @@ def generateModelFromOctree(octTree,numRays):
         while i < N:
             vox = voxels[i]
             for j in vox.lineSegments.keys():
-                G[j,i] = vox.lineSegments[j].sep   
+                if j < numRays:
+                    G[j,i] = vox.lineSegments[j].sep   
             x[i,:] = vox.centroid
             i += 1
         return G,Cm,m,x
@@ -42,11 +48,15 @@ def generateModelFromOctree(octTree,numRays):
     return G,Cm,m,x
 
 def electronDensity2RefractiveIndex(ne,frequency=120e6):
+    '''input the refractive index in electron/m^3 and frequency in Hz,
+    and get the refractive index.'''
     #eCharge = 1.60217662e-19#C = F.V = W.s/V^2.V = kg.m^2/s^2/V
     #epsilonPerm = 8.854187817e-12#F/m = kg.m/s^2/V^2
     #eMass = 9.10938215e-31#kg
     #constant = eCharge**2*4*pi/eMass
-    constant = 56.3*56.3#Hz^2 m^3 lightman p 226
+    constant = 5.63e4*5.63e4
+    #wp = 5.63e4*np.sqrt(ne/1e6)#Hz^2 m^3 lightman p 226
+    constant = 56.3 * 56.3
     n = np.sqrt(1. - constant*ne/frequency**2)
     dndne = constant/frequency**2/n/2.
     return n,dndne
@@ -55,7 +65,8 @@ def electronDensity2RefractiveIndex(ne,frequency=120e6):
 def setOctTreeElectronDensity(octTree,ne,neVar,frequency=120e6):
     '''Set the model in the octTree. 
     Assumes the model is derived from the same octTree and
-    Cm is the diagonal of the covariance.'''
+    Cm is the diagonal of the covariance.
+    unit km^3'''
     voxels = getAllDecendants(octTree)
     N = len(voxels)
     i = 0
@@ -63,8 +74,8 @@ def setOctTreeElectronDensity(octTree,ne,neVar,frequency=120e6):
         vox = voxels[i]
         vox.properties['ne'] = ['intensive',ne[i],neVar[i]]
         vox.properties['Ne'] = ['extensive',ne[i]*vox.volume,neVar[i]*vox.volume]
-        n,dndne = electronDensity2RefractiveIndex(vox.properties['ne'][1],frequency)
-        vox.properties['n'] = ['intensive',n,dndne**2*vox.properties['ne'][2]]
+        #n,dndne = electronDensity2RefractiveIndex(vox.properties['ne'][1],frequency)
+        #vox.properties['n'] = ['intensive',n,dndne**2*vox.properties['ne'][2]]
         vox.lineSegments = {}
         i += 1
 
@@ -84,11 +95,10 @@ def setOctTreeElectronNumber(octTree,Ne,NeVar,frequency = 120e6):
         vox.lineSegments = {}
         i += 1        
 
-def makeRaysFromSourceAndReciever(recievers=None,directions=None,sources=None,maxBaseline = 100.,height=1000.,numSources=15,numRecievers=40):
+def makeRaysFromSourceAndReciever(recievers=None,directions=None,sources=None,maxBaseline = 100.,height=1000.,numSources=15,numRecievers=10):
     """make rays"""
     #make recievers
     if recievers is None:
-        numRecievers = 40
         print("Generating {0} recievers".format(numRecievers))
         recievers = []
         for i in range(numRecievers):
@@ -96,13 +106,18 @@ def makeRaysFromSourceAndReciever(recievers=None,directions=None,sources=None,ma
                    np.random.uniform(low = -maxBaseline/4.,high = maxBaseline/4.),
                    -epsFloat]))
             
-    if sources is None:
+    if directions is None:
         print("Generating {0} sources".format(numSources))
-        sources = []
+        theta = np.pi/4.
+        phi = 0.
+        directions = []
         for i in range(numSources):
-            sources.append(np.array([np.random.uniform(low = -maxBaseline/4.,high =maxBaseline/4.),
-                   np.random.uniform(low = -maxBaseline/4.,high = maxBaseline/4.),
-                   height]))
+            alt = theta + np.random.uniform(low = -5*np.pi/180.,high = 5*np.pi/180.)
+            az = phi + np.random.uniform(low = -5*np.pi/180.,high =5*np.pi/180.)
+            z = np.sin(alt)
+            x = np.cos(alt)*np.sin(az)
+            y = np.cos(alt)*np.cos(az)
+            directions.append(np.array([x,y,z]))
     if directions is None:
         numDirections = numSources
         directions = []
@@ -119,15 +134,16 @@ def makeRaysFromSourceAndReciever(recievers=None,directions=None,sources=None,ma
             count += 1
     return rays
 
-def compute3dExponentialCovariance(sigma,L,x):
+def compute3dExponentialCovariance(sigma,L,x,load=False):
     '''exponential covariance model'''
     filename = "covariance_{0}.npy".format(x.shape[0])
-    try:
-        Cm = np.load(filename)
-        print("Loaded {0}".format(filename))
-        return Cm
-    except:
-        pass
+    if load:
+        try:
+            Cm = np.load(filename)
+            print("Loaded {0}".format(filename))
+            return Cm
+        except:
+            pass
     N = x.shape[0]
     Cm = np.zeros([N,N])
     if np.size(sigma) == N:
@@ -163,15 +179,106 @@ def ionosphereModel(x,dayTime=True,bump=False):
         res += 0.2*np.exp(-np.sum((x - np.array([-30,-30,200]))**2)/50.**2)
     return res
 
-def constructIonosphereModel(maxBaseline,height):
+def repartitionOctTree(octTree,rays, maxNum=3,minScale = 5.):
+    '''Assuming a model has been set and a set of rays has been propagated,
+    refine the grid such that no cell has more than ``maxNum`` rays passing through it.'''
+    someRemain = True
+    iter=0
+    while someRemain:
+        if iter > 5:
+            break
+        iter += 1
+        cleanRays(octTree)
+        for ray in rays:
+            forwardRay(ray,octTree)
+        #plotOctTreeXZ(octTree,ax=None)
+        #mayaviPlot(x,m,mBackground=None,maxNumPts=None,octTree=None)
+        
+        G,Cm,m,x = generateModelFromOctree(octTree,len(rays))
+        C = np.sum(G>0,axis=0)
+        if np.max(C) <= maxNum:
+            someRemain = False
+            continue
+        voxels = getAllDecendants(octTree)
+        i = 0
+        someRemain = False
+        while i < len(C):
+            if C[i] > maxNum:
+                if voxels[i].dx > 2*minScale and voxels[i].dy > 2*minScale and voxels[i].dz > 2*minScale :
+                    subDivide(voxels[i])
+                    someRemain = True
+            i += 1
+    #plotOctTree(octTree)
+    #plotOctTreeXZ(octTree,ax=None)
+    #plotOctTreeYZ(octTree,ax=None)
+    return octTree
+              
+    
+def constructIonosphereModel(height=1000.,maxBaseline=150.,rays = None,load=False):
     '''initialize with 1/m^3 at 300km +- 150km'''
+    if rays is not None:
+        fileName = "IonosphereOctTree_AutoPartition.npy"
+        if load:
+            try:
+                octTree = loadOctTree(filename)
+                return octTree
+            except:
+                pass
+        recievers = np.zeros([len(rays),3])
+        directions = np.zeros([len(rays),3])
+        i = 0
+        while i < len(rays):
+            recievers[i,:] = rays[i].origin
+            directions[i,:] = rays[i].dir
+            i += 1
+        #min and max of recievers
+        minLim1 = np.min(recievers,axis=0)
+        maxLim1 = np.max(recievers,axis=0)
+        #min and max of sources
+        upperPlane = Plane(np.array([0,0,height+ maxLim1[2]+epsFloat]),normal=([0,0,1]))
+        points = []
+        for ray in rays:
+            res,point = intersectRayPlane(ray,upperPlane)
+            if not res:
+                print("ray misses uper plane?")
+                return
+            points.append(point)
+        points = np.array(points)
+        minLim2 = np.min(points,axis=0)
+        maxLim2 = np.max(points,axis=0)
+        xmin = min(minLim2[0],minLim1[0])
+        xmax = max(maxLim2[0],maxLim1[0])
+        ymin = min(minLim2[1],minLim1[1])
+        ymax = max(maxLim2[1],maxLim1[1])
+        zmin = min(minLim2[2],minLim1[2])
+        zmax = max(maxLim2[2],maxLim1[2])
+        dx = 2*(np.abs(xmax) + np.abs(xmin))
+        dy = 2*(np.abs(ymax) + np.abs(ymin))
+        center = [0,0,height/2. + maxLim1[2]+epsFloat]
+        #print(center,dx,dy,height)
+        octTree = OctTree(center,dx=dx*1.2,dy=dy*1.2,dz=height)
+        subDivide(octTree)
+        #plotOctTreeXZ(octTree,ax=None)
+        octTree = repartitionOctTree(octTree,rays, maxNum=5,minScale=30.)
+        numVoxels = countDecendants(octTree)
+        print("Generated an octtree with {0} voxels.".format(numVoxels))
+        plotOctTreeXZ(octTree,ax=None)
+        G,Cm,m,x = generateModelFromOctree(octTree,0)
+        i = 0
+        while i < x.shape[0]:
+            m[i] = ionosphereModel(x[i,:],dayTime=True,bump=False)
+            i += 1
+        setOctTreeElectronDensity(octTree,m,np.ones_like(m)*0.05**2)
+        saveOctTree(fileName,octTree)
+        return octTree
 
     fileName = "ionosphereModel_5levels.npy"
-    try:
-        octTree = loadOctTree(filename)
-        return octTree
-    except:
-        pass
+    if load:
+        try:
+            octTree = loadOctTree(filename)
+            return octTree
+        except:
+            pass
     octTree = OctTree([0,0,height/2.],dx=maxBaseline,dy=maxBaseline,dz=height)
     #level 3 - all
     #subDivide(subDivide(octTree))
@@ -193,6 +300,7 @@ def constructIonosphereModel(maxBaseline,height):
         i += 1
     setOctTreeElectronDensity(octTree,m,np.ones_like(m)*0.05**2)
     saveOctTree(fileName,octTree)
+    #plotOctTreeXZ(octTree,ax=None)
     #plotOctTreeXZ(octTree,ax=None)
     #plotOctTree3D(octTree,model=m)
     return octTree
@@ -250,7 +358,7 @@ def transformCov2Linear(Cm_log,K):
     '''
     return (np.exp(Cm_log) - 1.)*K**2
 
-def mayaviPlot(x,m,mBackground=None,maxNumPts=None):
+def mayaviPlot2(x,m,mBackground=None,maxNumPts=None):
     '''Do a density plot'''
 
     from mayavi.sources.api import VTKDataSource
@@ -518,6 +626,7 @@ def metropolisPosteriorCovariance(G,dobs,Cd,CmlogPost,mlogPost,K):
 def LMSol(G,mprior,Cd,Cm,dobs,mu=1.,octTree=None):
     """Assume the frechet derivative is,
     G(x) = exp"""
+    import pylab as plt
 
     K = np.mean(mprior)
     mlog = np.log(mprior/K)
@@ -536,6 +645,8 @@ def LMSol(G,mprior,Cd,Cm,dobs,mu=1.,octTree=None):
         C[C==0] = np.min(C[C>0])/2.
     else:
         C = np.sum(G>0,axis=0)
+        plt.hist(C)
+        plt.show()
         C = C/float(np.max(C))
         C[C==0] = np.min(C[C>0])/2.
         #C = np.sum(G,axis=0)
@@ -575,85 +686,251 @@ def LMSol(G,mprior,Cd,Cm,dobs,mu=1.,octTree=None):
     #print(transformCov2Linear(CmlogPost,K) - cmlin)
     return K*np.exp(mlog), cmlin
 
-def invertTEC(infoFile,dataFolder,timeStart = 0, timeEnd = 0,arrayFile='arrays/lofar.hba.antenna.cfg'):
+class InversionCoordSys(object):
+
+    '''Handles the frame and cartesian coordiantes for an inversion.
+    Allows time varying, as well as fixed.'''
+    def __init__(self,radioArray):     
+        self.radioArray = radioArray
+        self.phaseTracking = False
+        self.fixedFrame = False
+        self.altaz = None
+        
+    def setPhaseTracking(self,ra,dec):
+        """ra and dec in deg, sets the ra and dec that defines the center of the tangent plane of sky"""
+        self.phaseTrack = ac.SkyCoord(ra=ra*au.deg,dec =dec*au.deg,frame='icrs')
+        self.phaseTracking = True
+        seld.fixedFrame = False
+    def setFixedFrame(self,xyz):
+        self.fixedFrameDir = xyz
+        self.phaseTracking = False
+        self.fixedFrame = True
+    def getDirection(self,ra,dec,time):
+        '''define a frame at time and radioArray center, and return
+        the direction ENU coords'''
+        frame = ac.AltAz(location = self.radioArray.getCenter(), obstime = time, pressure=None)
+        rd = ac.SkyCoord(ra=ra*au.deg,dec = dec*au.deg, frame='icrs')
+        altaz = rd.transform_to(frame)
+        self.altaz = altaz
+        alt = altaz.alt.rad
+        az = altaz.az.rad
+        #phase tracking points straight up
+        z = np.sin(alt)
+        x = np.cos(alt)*np.sin(az)
+        y = np.cos(alt)*np.cos(az)
+        return np.array([x,y,z])
+    def getAxes(self):
+        if self.fixedFrame:
+            rotDirection = self.fixedFrameDir
+        if self.phaseTracking:
+            rotDirection = self.getDirection(self.phaseTrack.ra.deg,self.phaseTrack.dec.deg,time)
+        #rotate ENU to rotDirection
+        axis = np.cross(np.array([0,0,1]),rotDirection)
+        angle = np.arccos(rotDirection.dot(np.array([0,0,1])))
+        R = rot(axis,angle)
+        x = R.dot(np.array([1,0,0]))
+        y = R.dot(np.array([0,1,0]))
+        z = R.dot(np.array([0,0,1]))
+        return x,y,z
+    def getComponents(self,ra,dec,time):
+        '''Get the cartesian components defined by frame.
+        time is astropy time or isot string'''
+        if type(time) == type(""):
+            try:
+                time = at.Time(time,format='isot',scale='tai')
+            except:
+                print("{0} is not in isot format".format(time))
+                return
+        xyz = self.getDirection(ra,dec,time)
+        if self.fixedFrame:
+            rotDirection = self.fixedFrameDir
+        if self.phaseTracking:
+            rotDirection = self.getDirection(self.phaseTrack.ra.deg,self.phaseTrack.dec.deg,time)
+        #rotate ENU to rotDirection
+        axis = np.cross(np.array([0,0,1]),rotDirection)
+        angle = np.arccos(rotDirection.dot(np.array([0,0,1])))
+        R = rot(axis,angle)
+        return R.dot(xyz)
+
+def invertTEC(infoFile,dataFolder,timeStart = 0, timeEnd = 0,arrayFile='arrays/lofar.hba.antenna.cfg',load=False):
     '''Invert the 3d tec from data.
-    timeStart, timeEnd inclusive'''
+    timeStart, timeEnd inclusive.
+    Puts the data into an ENU system then rotates the up to the mean direction vector
+    before partitioning the system.'''
     import glob
-    import astropy.units as au
-    import astropy.time as at
-    import astropy.coordinates as ac
+    from RadioArray import RadioArray
     
-    #get patch names and directions for dataset
-    info = np.load(infoFile)
-    patches = info['patches']
-    numDirs = len(patches)
-    radec = info['directions']
-    print("Loading {0} directions".format(len(patches)))
-    #get array stations
-    stationLabels = np.genfromtxt(arrayFile, comments='#',usecols = (4))
-    stationLocs = np.genfromtxt(arrayFile, comments='#',usecols = (0,1,2))
-    numStations = len(stationLabels)
-    #assume all times and antennas are same in each datafile
-    recievers = []
-    numRays = (timeEnd - timeStart + 1)*numPatches
-    data = np.zeros(numRays)
-    directions = []
-    i = 0
-    failed = 0
-    while i < len(patches):
-        patch = patches[i]
-        rd = radec[i]
-        file = glob.glob("{0}/*_{1}_*.npz".format(dataFolder,patch))[0]
-        print("Loading data file: {0}".format(file))
+    dataFile = "TecInversionData.npz"
+    generate = True
+    if load:
+        print("Loading:",dataFile)
         try:
-            d = np.load(file)
+            TecData = np.load(dataFile)
+            data = TecData['data']
+            rotatedRays = TecData['rotatedRays']
+            rays = TecData['rays']
+            generate = False
         except:
-            print("Failed loading data file: {0}".format(file))
-            failed += 1
-            i += 1
-            continue
-        antennas = d['antennas']
-        times = d['times'][timeStart:timeEnd+1]
-        j = 0
-        while j < len(times):
-            frame = ac.AltAz(loc = )
-        data = d['data']#times x antennas
-        
-    data = []
-    sources = []
-    antennas = []
-    times = []
-    d
-    
-    
-    print(d.keys())
-    print(d['antennas'].shape)
-    print(d['times'].shape)
-    print(d['data'].shape)
-        
-if __name__=='__main__':
-    np.random.seed(1234)
-    print("Constructing ionosphere model")
-    maxBaseline = 150.
-    height=10000.
-    octTree = constructIonosphereModel(maxBaseline,height)
-    rays = makeRaysFromSourceAndReciever(maxBaseline = maxBaseline,height=height)
-    print("Propagating {0} rays".format(len(rays)))
+            pass
+    if generate:
+        print("creating radio array")
+        radioArray = RadioArray(arrayFile)
+        print("creating coord sys")
+        coordSys = InversionCoordSys(radioArray)
+        coordSysSet = False
+        enu = ENU(location=radioArray.getCenter().earth_location)
+        print("ENU system set: {0}".format(enu))
+        meanDirection = np.zeros(3)
+        numRays = 0
+        #get patch names and directions for dataset
+        info = np.load(infoFile)
+        patches = info['patches']
+        numPatches = len(patches)
+        radec = info['directions']
+        print("Loaded {0} patches".format(numPatches))
+        #get array stations (shoud fold this into radioArray. todo)
+        stationLabels = np.genfromtxt(arrayFile, comments='#',usecols = (4),dtype=type(""))
+        stationLocs = np.genfromtxt(arrayFile, comments='#',usecols = (0,1,2))
+        numStations = len(stationLabels)
+        print("Number of stations in array: {0}".format(numStations))
+        #assume all times and antennas are same in each datafile
+        recievers = []
+        numTimes =  (timeEnd - timeStart + 1)
+        print("Number of time stamps: {0}".format(numTimes))
+        #each time gives a different direction for each patch
+        numDirs = numTimes*numPatches
+        print("Number of directions: {0}".format(numDirs))
+        data = []
+        rays = []
+        stationIndices = []
+        timeIndices = []
+        patchIndices = []
+        skyPlane = Plane([0,0,1000],normal=[0,0,1])
+        skyProj = []
+        skyProjCoords = []
+        patchIdx = 0
+        failed = 0
+        rayId = 0
+        while patchIdx < numPatches:
+            patch = patches[patchIdx]
+            rd = radec[patchIdx]
+            files = glob.glob("{0}/*_{1}_*.npz".format(dataFolder,patch))
+            if len(files) == 1:
+                file = files[0]
+            else:
+                print('Could not find patch: {0}'.format(patch))
+                patchIdx += 1
+                continue
+            print("Loading data file: {0}".format(file))
+            try:
+                d = np.load(file)
+            except:
+                print("Failed loading data file: {0}".format(file))
+                failed += 1
+                patchIdx += 1
+                continue
+            antennas = d['antennas']
+            times = d['times'][timeStart:timeEnd+1]
+            tecData = d['data'][timeStart:timeEnd+1,:]#times x antennas
+            timeIdx = 0
+            while timeIdx < numTimes:
+                #dirIdx = i*numTimes + j
+                time = at.Time(times[timeIdx],format='gps',scale='tai')
+                print("Processing time: {0}".format(time.isot))
+                frame = ac.AltAz(location=radioArray.getCenter().earth_location,obstime=time)
+                if not coordSysSet:
+                    print("fixing coord sys to first patch")
+                    fixedDir = coordSys.getDirection(rd.ra.deg,rd.dec.deg,time)
+                    coordSys.setFixedFrame(fixedDir)
+                    coordSysSet = True
+
+                    #print(coordSys.altaz.alt)
+                    rayFrame = Ray([0,0,0],fixedDir)
+                    pointPOS = rayFrame.eval(1000)#1000km
+                    skyPlane = Plane(pointPOS,normal=rayFrame.dir)
+
+                # get direction of patch at time wrt fixed frame
+                dir = ac.SkyCoord(rd.ra,rd.dec,frame='icrs').transform_to(frame)
+                print("Patch Alt: {0} Az: {1}".format(dir.alt.deg,dir.az.deg))
+                dir = dir.transform_to(enu)
+                meanDirection += dir.cartesian.xyz.value
+                numRays += 1
+                print("Patch east: {0} north: {1} up: {2}".format(dir.east,dir.north,dir.up))
+
+                #dir = coordSys.getComponents(rd.ra.deg,rd.dec.deg,time)
+                #xaxis,yaxis,zaxis = coordSys.getAxes()
+                antIdx = 0#index in solution table
+                while antIdx < len(antennas):
+                    ant = antennas[antIdx]
+                    #find index in stationLabels
+                    labelIdx = 0
+                    while labelIdx < numStations:
+                        if stationLabels[labelIdx] == ant:
+                            break
+                        labelIdx += 1
+                    if labelIdx >= numStations:
+                        print("Could not find {0} in available stations: {1}".format(ant,stationLabels))
+                        continue
+                    #ITRS WGS84
+
+                    stationLoc = ac.SkyCoord(*stationLocs[labelIdx]*au.m,frame='itrs').transform_to(enu)
+                    origin = stationLoc.cartesian.xyz.to(au.km).value#/wavelength enu system
+                    #print(origin)
+                    rays.append(Ray(origin,dir.cartesian.xyz.value,id = rayId))
+                    rayId += 1
+                    data.append(tecData[timeIdx,antIdx])
+                    skyProj.append(data[-1])
+                    res,point = intersectRayPlane(rays[-1],skyPlane)
+                    skyProjCoords.append(point)
+                    stationIndices.append(labelIdx)
+                    timeIndices.append(timeIdx)
+                    patchIndices.append(patchIdx)
+                    antIdx += 1
+                timeIdx += 1
+            patchIdx += 1
+        #rotate the rays and stations so that the mean direction points up
+        meanDirection /= numRays
+        #
+        axis = np.cross(np.array([0,0,1]),meanDirection)
+        angle = np.arccos(meanDirection.dot(np.array([0,0,1])))
+        R = rot(axis,-angle)
+        rotatedRays = []
+        id = 0
+        for ray in rays:
+            origin = R.dot(ray.origin)
+            dir = R.dot(ray.dir)
+            rotatedRays.append(Ray(origin,dir,id=id))
+            id += 1
+            #print (rotatedRays[-1])
+        np.savez(dataFile,rays=rays,rotatedRays=rotatedRays,
+                data=data,stationIndices=stationIndices,
+                timeIndices=timeIndices,patchIndices=patchIndices)
+    #rotated rays and data are now fit for inversion
+    print("Constructing the ionosphere")
+    octTree = constructIonosphereModel(height=2000.,rays = rays,load=False)
+    cleanRays(octTree)
     for ray in rays:
         forwardRay(ray,octTree)
     print("Pulling ray propagations.")
-    G,mVar,mexact,x = generateModelFromOctree(octTree,len(rays))
-    print("Computing model 3d exponential covariance")
-    Cmprior = compute3dExponentialCovariance(np.sqrt(np.mean(mVar)),30.,x)
-
+    G,mVar,mprior,x = generateModelFromOctree(octTree,len(rays))
+    dataBase = G.dot(mprior)
+    data = dataBase + data*1e3
+    #avgBase = np.mean(dataBase)
+    #print("Avg Base:",avgBase)
+    #print("Avg Data:",np.mean(data))
+    #print(np.sum(data==0))
+    #data += avgBase
     #generate simple initial starting point
     print("Setting a priori model")
-    mprior = []
+    mexact = []
     i = 0
     while i < x.shape[0]:
-        mprior.append(ionosphereModel(x[i,:],dayTime=False,bump=False))
+        mexact.append(ionosphereModel(x[i,:],dayTime=True,bump=True))
         i += 1
-    mprior = np.array(mprior)
+    mexact = np.array(mexact)
+    print("Computing model 3d exponential covariance")
+    Cmprior = compute3dExponentialCovariance(np.sqrt(np.mean(mVar)),30.,x,load=False)
+    #generate simple initial starting point
     #mprior = np.ones_like(mexact)*initHomogeneousModel(G,dobs)
     #mprior = np.random.multivariate_normal(mean=mexact, cov = Cmprior)
     print("Computing observation covariance")
@@ -662,29 +939,90 @@ if __name__=='__main__':
         dobs.append(G.dot(np.abs(np.random.multivariate_normal(mean=mexact, cov = Cmprior))))
     dobs = np.array(dobs)
     Cd = np.cov(dobs.transpose())
-    dobs = G.dot(mexact)
+    dobs = data
     print("Solving for model from rays:")
     #m,Cm = LinearSolution(dobs,G,Cd,Cmprior,mprior)
     #m,Cm = MetropolisSolution(G,dobs,Cd,Cmprior,mprior)
     #m = BerrymanSol(G,dobs,mprior=None,Cd=Cd,Cm=None,mu=0.00)
     #m,Cm = SteepestDescent(octTree,rays,dobs,Cd,Cmprior,mprior)
+    np.savez("invertTECData.npz",G=G,mprior=mprior,Cd=Cd,Cmprior=Cmprior,dobs=dobs,octTree=octTree,rays=rays)
     m,Cm = LMSol(G,mprior,Cd,Cmprior,dobs,mu=1.0,octTree=None)
-    mayaviPlot(x,m,mBackground=mprior)
+    mayaviPlot2(x,m,mBackground=mprior)
     CmCm = Cm.dot(np.linalg.inv(Cmprior))
     R = np.eye(CmCm.shape[0]) - CmCm
     print("Resolved by dataSet:{0}, resolved by a priori:{1}".format(np.trace(R),np.trace(CmCm)))
-    plot=False
-    if plot:
-        import pylab as plt
-        plt.plot(m,label='res')
-        plt.plot(mexact,label='ex')
-        plt.plot(mprior,label='pri')
-        C = np.sum(G>0,axis=0)
-        C = C < 3
-        plt.scatter(np.arange(len(m))[C],m[C])
-        plt.legend(frameon=False)
-        plt.show()
-        plotOctTreeXZ(octTree,ax=None)
-        plotOctTree3D(octTree,model=m,rays=False)
-   
+    
+if __name__=='__main__':
+    
+    np.random.seed(1234)
+    #invertTEC("/Users/josh/ownCloud/ionosphere/tomography/SB120-129/WendysBootes.npz",
+    #          "/Users/josh/ownCloud/ionosphere/tomography/SB120-129",
+    #          timeStart = 0, 
+    #          timeEnd = 0,
+    #          arrayFile='arrays/lofar.hba.antenna.cfg',load=True)
+    if True:
+        print("Constructing ionosphere model")
+        maxBaseline = 150.
+        height=1000.
+        
+        rays = makeRaysFromSourceAndReciever(maxBaseline = maxBaseline,height=height)
+        octTree = constructIonosphereModel(maxBaseline=maxBaseline,height=height,rays = rays)
+        cleanRays(octTree)
+        print("Propagating {0} rays".format(len(rays)))
+        for ray in rays:
+            forwardRay(ray,octTree)
+        print("Pulling ray propagations.")
+        G,mVar,mexact,x = generateModelFromOctree(octTree,len(rays))
+        print("Computing model 3d exponential covariance")
+        Cmprior = compute3dExponentialCovariance(np.sqrt(np.mean(mVar)),30.,x)
+
+        #generate simple initial starting point
+        print("Setting a priori model")
+        mprior = []
+        i = 0
+        while i < x.shape[0]:
+            mprior.append(ionosphereModel(x[i,:],dayTime=False,bump=False))
+            i += 1
+        mprior = np.array(mprior)
+        #mprior = np.ones_like(mexact)*initHomogeneousModel(G,dobs)
+        #mprior = np.random.multivariate_normal(mean=mexact, cov = Cmprior)
+        print("Computing observation covariance")
+        dobs = []
+        for i in range(10):
+            dobs.append(G.dot(np.abs(np.random.multivariate_normal(mean=mexact, cov = Cmprior))))
+        dobs = np.array(dobs)
+        Cd = np.cov(dobs.transpose())
+        dobs = G.dot(mexact)
+        print("Solving for model from rays:")
+        #m,Cm = LinearSolution(dobs,G,Cd,Cmprior,mprior)
+        #m,Cm = MetropolisSolution(G,dobs,Cd,Cmprior,mprior)
+        #m = BerrymanSol(G,dobs,mprior=None,Cd=Cd,Cm=None,mu=0.00)
+        #m,Cm = SteepestDescent(octTree,rays,dobs,Cd,Cmprior,mprior)
+        m,Cm = LMSol(G,mprior,Cd,Cmprior,dobs,mu=1.0,octTree=None)
+        #smoothify and plot
+        s = fp.SmoothVoxel(octTree)
+        model = s.smoothifyOctTree()
+        fp.plotCube(model ,-octTree.dx/2.,octTree.dx/2.,-octTree.dy/2.,octTree.dy/2.,0.,1000.,N=128,dx=None,dy=None,dz=None)
+        mayaviPlot2(x,m,mBackground=mprior)
+        CmCm = Cm.dot(np.linalg.inv(Cmprior))
+        R = np.eye(CmCm.shape[0]) - CmCm
+        print("Resolved by dataSet:{0}, resolved by a priori:{1}".format(np.trace(R),np.trace(CmCm)))
+        plot=False
+        if plot:
+            import pylab as plt
+            plt.plot(m,label='res')
+            plt.plot(mexact,label='ex')
+            plt.plot(mprior,label='pri')
+            C = np.sum(G>0,axis=0)
+            C = C < 3
+            plt.scatter(np.arange(len(m))[C],m[C])
+            plt.legend(frameon=False)
+            plt.show()
+            plotOctTreeXZ(octTree,ax=None)
+            plotOctTree3D(octTree,model=m,rays=False)
+
+
+# In[ ]:
+
+
 

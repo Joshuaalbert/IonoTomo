@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[10]:
+# In[17]:
 
 import astropy.coordinates as ac
 import astropy.units as au
@@ -169,9 +169,15 @@ if __name__=='__main__':
     logger = Logger()
     radioArray = RadioArray(arrayFile='arrays/gmrtPos.csv',log=logger.log)
     radioArray = RadioArray(arrayFile='arrays/lofar.hba.antenna.cfg',log=logger.log)
+    print(radioArray.getCenter().earth_location.geodetic[2].value)
     #print radioArray.center.earth_location.height
     #times = at.Time([0,2,4]*au.s,format='gps',scale='utc')
     #radioArray.calcBaselines(times,np.array([12,62]))
     #v = radioArray.baselines[0,:,:,1]
     #testBaselines()
+
+
+# In[ ]:
+
+
 

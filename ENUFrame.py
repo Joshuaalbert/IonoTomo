@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[10]:
+# In[18]:
 
 from __future__ import (absolute_import, unicode_literals, division,
                         print_function)
@@ -177,8 +177,10 @@ if __name__ == '__main__':
     loc = ac.EarthLocation(x=1*u.m,y=0*u.m,z=0*u.m)
     time = at.Time(1,format='gps')
     h = loc1.transform_to('itrs')
-    enu = ENU(location=loc,obstime=time)
-    print(loc1.transform_to(enu))
+    enu = ENU(location=loc)
+    locenu = loc1.transform_to(enu)
+    print("locenu:",locenu.up)
+    print(locenu.elevation)
     print(loc1.transform_to(enu).transform_to('itrs'))
     print(loc1.transform_to(enu).transform_to('itrs').transform_to(enu))
     aa = ac.AltAz(obstime=time,location=loc)
@@ -186,4 +188,9 @@ if __name__ == '__main__':
     print(s.transform_to(aa))
     print(s.transform_to(aa).transform_to(enu))
     print(s.transform_to(aa).transform_to(enu).transform_to(aa))
+
+
+# In[ ]:
+
+
 
