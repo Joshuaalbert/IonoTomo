@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[18]:
+# In[14]:
 
 from __future__ import (absolute_import, unicode_literals, division,
                         print_function)
@@ -173,18 +173,22 @@ def enu_to_enu(from_coo, to_frame):
 if __name__ == '__main__':
     import astropy.coordinates as ac
     import astropy.time as at
-    loc1 = ac.SkyCoord(x=1.1*u.m,y=2*u.m,z=1*u.m,obstime=at.Time(0,format='gps'),frame='itrs')
+    loc1 = ac.SkyCoord(x=np.array([1.1,1])*u.m,y=[2,1]*u.m,z=[1,1]*u.m,obstime=at.Time(0,format='gps'),frame='itrs')
     loc = ac.EarthLocation(x=1*u.m,y=0*u.m,z=0*u.m)
     time = at.Time(1,format='gps')
     h = loc1.transform_to('itrs')
-    enu = ENU(location=loc)
+    enu = ENU(obstime=at.Time(0,format='gps'),location=loc)
+    print(enu.location.geocentric)
+    loc3 = ac.SkyCoord(np.array([1.1,1])*u.m,[2,1]*u.m,[1,1]*u.m,frame=enu)
+    print(loc3.transform_to('itrs'))
     locenu = loc1.transform_to(enu)
-    print("locenu:",locenu.up)
+    print("locenu:",locenu)
     print(locenu.elevation)
-    print(loc1.transform_to(enu).transform_to('itrs'))
+    print(loc1.transform_to(enu).transform_to('itrs').spherical)
     print(loc1.transform_to(enu).transform_to('itrs').transform_to(enu))
     aa = ac.AltAz(obstime=time,location=loc)
     s = ac.SkyCoord(ra=45*u.deg,dec=45*u.deg)
+    print("unit:",s.transform_to('itrs').spherical.distance)
     print(s.transform_to(aa))
     print(s.transform_to(aa).transform_to(enu))
     print(s.transform_to(aa).transform_to(enu).transform_to(aa))

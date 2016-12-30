@@ -107,9 +107,11 @@ def gramSchmidt(dir):
 ###
 
 class Ray(object):
-    def __init__(self,origin,direction,id=-1):
+    def __init__(self,origin,direction,id=-1,time=None):
         if id >= 0:
             self.id = id
+        if time is not None:
+            self.time = time
         self.origin = np.array(origin)
         self.dir = np.array(direction)/np.sqrt(np.dot(direction,direction))
     def eval(self,t):
