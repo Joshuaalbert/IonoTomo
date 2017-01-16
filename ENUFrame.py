@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[14]:
+# In[62]:
 
 from __future__ import (absolute_import, unicode_literals, division,
                         print_function)
@@ -82,45 +82,53 @@ class ENU(BaseCoordinateFrame):
         """
         return np.arctan2(self.up,np.sqrt(self.north**2 + self.east**2))
 
-
-
-
 @frame_transform_graph.transform(FunctionTransform, ITRS, ENU)
 def itrs_to_enu(itrs_coo, enu_frame):
+    '''Defines the transformation between ITRS and the ENU frame.
+    ITRS usually has units attached but ENU does not require units 
+    if it specifies a direction.'''
     
-    
+    if np.any(itrs_coo.obstime != enu_frame.obstime):
+        itrs_coo = itrs_coo.transform_to(ITRS(obstime=enu_frame.obstime))
+        
+    # if the data are UnitSphericalRepresentation, we can skip the distance calculations
+    is_unitspherical = (isinstance(itrs_coo.data, UnitSphericalRepresentation) or
+                        itrs_coo.cartesian.x.unit == u.one)
     
     lon, lat, height = enu_frame.location.to_geodetic('WGS84')
-    sinlat = np.sin(lat.to(u.radian).value)
-    coslat = np.cos(lat.to(u.radian).value)
-    sinlon = np.sin(lon.to(u.radian).value)
-    coslon = np.cos(lon.to(u.radian).value)
+    lonrad = lon.to(u.radian).value
+    latrad = lat.to(u.radian).value
+    sinlat = np.sin(latrad)
+    coslat = np.cos(latrad)
+    sinlon = np.sin(lonrad)
+    coslon = np.cos(lonrad)
     north = [-sinlat*coslon,
                       -sinlat*sinlon,
                       coslat]
     east = [-sinlon,coslon,0]
     up = [coslat*coslon,coslat*sinlon,sinlat]
     R = np.array([east,north,up])
-    try:
-        p = itrs_coo.cartesian.xyz.to(u.m).value
-        p0 = np.array(enu_frame.location.to(u.m).value)
-        diff = p-p0
-        penu = R.dot(diff)
-      
-        rep = CartesianRepresentation(x = u.Quantity(penu[0],u.m,copy=False),
-                                     y = u.Quantity(penu[1],u.m,copy=False),
-                                     z = u.Quantity(penu[2],u.m,copy=False),
-                                     copy=False)
-    except:
+    
+    if is_unitspherical:
+        #don't need to do distance calculation
         p = itrs_coo.cartesian.xyz.value
         diff = p
         penu = R.dot(diff)
-      
-        rep = CartesianRepresentation(x = u.Quantity(penu[0],None,copy=False),
-                                     y = u.Quantity(penu[1],None,copy=False),
-                                     z = u.Quantity(penu[2],None,copy=False),
+    
+        rep = CartesianRepresentation(x = u.Quantity(penu[0],u.one,copy=False),
+                                     y = u.Quantity(penu[1],u.one,copy=False),
+                                     z = u.Quantity(penu[2],u.one,copy=False),
                                      copy=False)
-        
+    else:
+        p = itrs_coo.cartesian.xyz
+        p0 = ITRS(*enu_frame.location.geocentric,obstime=enu_frame.obstime).cartesian.xyz
+        diff = (p.T-p0).T
+        penu = R.dot(diff)
+      
+        rep = CartesianRepresentation(x = penu[0],#u.Quantity(penu[0],u.m,copy=False),
+                                     y = penu[1],#u.Quantity(penu[1],u.m,copy=False),
+                                     z = penu[2],#u.Quantity(penu[2],u.m,copy=False),
+                                     copy=False)
 
     return enu_frame.realize_frame(rep)
 
@@ -144,20 +152,22 @@ def enu_to_itrs(enu_coo, itrs_frame):
     up = [coslat*coslon,coslat*sinlon,sinlat]
     R = np.array([east,north,up])
     
-    try:
-        diff = R.T.dot(enu_coo.cartesian.xyz.to(u.m).value)
-        p0 = np.array(enu_coo.location.to(u.m).value)
-        p = diff + p0
-        rep = CartesianRepresentation(x = u.Quantity(p[0],u.m,copy=False),
-                                     y = u.Quantity(p[1],u.m,copy=False),
-                                     z = u.Quantity(p[2],u.m,copy=False),
-                                     copy=False)
-    except:
-        diff = R.T.dot(enu_coo.cartesian.xyz.value)
+    if isinstance(enu_coo.data, UnitSphericalRepresentation) or enu_coo.cartesian.x.unit == u.one:
+        diff = R.T.dot(enu_coo.cartesian.xyz)
         p = diff
-        rep = CartesianRepresentation(x = u.Quantity(p[0],None,copy=False),
-                                     y = u.Quantity(p[1],None,copy=False),
-                                     z = u.Quantity(p[2],None,copy=False),
+        rep = CartesianRepresentation(x = u.Quantity(p[0],u.one,copy=False),
+                                     y = u.Quantity(p[1],u.one,copy=False),
+                                     z = u.Quantity(p[2],u.one,copy=False),
+                                     copy=False)
+    else:
+        diff = R.T.dot(enu_coo.cartesian.xyz)
+        p0 = ITRS(*enu_coo.location.geocentric,obstime=enu_coo.obstime).cartesian.xyz
+        #print (R,diff)
+        p = (diff.T + p0).T
+        #print (p)
+        rep = CartesianRepresentation(x = p[0],#u.Quantity(p[0],u.m,copy=False),
+                                     y = p[1],#u.Quantity(p[1],u.m,copy=False),
+                                     z = p[2],#u.Quantity(p[2],u.m,copy=False),
                                      copy=False)
 
     return itrs_frame.realize_frame(rep)
@@ -173,28 +183,25 @@ def enu_to_enu(from_coo, to_frame):
 if __name__ == '__main__':
     import astropy.coordinates as ac
     import astropy.time as at
-    loc1 = ac.SkyCoord(x=np.array([1.1,1])*u.m,y=[2,1]*u.m,z=[1,1]*u.m,obstime=at.Time(0,format='gps'),frame='itrs')
-    loc = ac.EarthLocation(x=1*u.m,y=0*u.m,z=0*u.m)
+    
+    #test to see if vector input works both ways
+    
+    loc = ac.EarthLocation(x=6731*u.km,y=1*u.km,z=1*u.km)
     time = at.Time(1,format='gps')
-    h = loc1.transform_to('itrs')
-    enu = ENU(obstime=at.Time(0,format='gps'),location=loc)
-    print(enu.location.geocentric)
-    loc3 = ac.SkyCoord(np.array([1.1,1])*u.m,[2,1]*u.m,[1,1]*u.m,frame=enu)
-    print(loc3.transform_to('itrs'))
-    locenu = loc1.transform_to(enu)
-    print("locenu:",locenu)
-    print(locenu.elevation)
-    print(loc1.transform_to(enu).transform_to('itrs').spherical)
-    print(loc1.transform_to(enu).transform_to('itrs').transform_to(enu))
-    aa = ac.AltAz(obstime=time,location=loc)
-    s = ac.SkyCoord(ra=45*u.deg,dec=45*u.deg)
-    print("unit:",s.transform_to('itrs').spherical.distance)
-    print(s.transform_to(aa))
-    print(s.transform_to(aa).transform_to(enu))
-    print(s.transform_to(aa).transform_to(enu).transform_to(aa))
-
-
-# In[ ]:
-
-
+    enu = ENU(obstime=time,location=loc)
+    print("With coord test:")
+    enucoords = ac.SkyCoord(east = np.array([0,1])*u.m,
+                            north=np.array([0,1])*u.m,
+                            up=np.array([0,1])*u.m,frame=enu)
+    print (enucoords)
+    print(enucoords.transform_to('itrs'))
+    print(enucoords.transform_to('itrs').transform_to(enu))
+    print("Without coord test:")
+    enucoords = ac.SkyCoord(east = np.array([0,1]),
+                            north=np.array([0,1]),
+                            up=np.array([0,1]),frame=enu)
+    print (enucoords)
+    print(enucoords.transform_to('itrs'))
+    print(enucoords.transform_to('itrs').transform_to(enu))
+    
 
