@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[3]:
+# In[30]:
 
 '''Based on the paper doi=10.1.1.89.7835
 the tricubic interpolation of a regular possibly non uniform grid can be seen as a computation of 21 cubic splines.
@@ -61,7 +61,8 @@ class TriCubic(object):
         return True
     
     def interp3(self,x,y,z,doDouble=False):
-        '''Do only on single points'''
+        '''Interpolate and return f,fx,fy,fz if doDouble is True then return also fxy,fxz, fyz.
+        Double derivatives do not yet work I think.'''
         #get cell starts for all dimensions
         if self.xUniform:
             xi = int((x - self.xvec[0])/self.dx)
@@ -98,7 +99,11 @@ class TriCubic(object):
             self.fx = 0.
             self.fy = 0.
             self.fz = 0.
-            return self.f,self.fx,self.fy,self.fz
+            if doDouble:
+                
+                return self.f,self.fx,self.fy,self.fz,0,0,0
+            else:
+                return self.f,self.fx,self.fy,self.fz
         #get interpolant from current, cache, or build
         ijk0 = self.index(xi,yi,zi)#bottom corner of cube
         if self.cijk0 == ijk0:
@@ -173,27 +178,6 @@ class TriCubic(object):
             return f,fx,fy,fz,fxy,fxz,fyz
         
         return f,fx,fy,fz
-        """
-        f,fx,fy,fz = 0.,0.,0.,0.
-        i = 0
-        while i <= 3:
-            j = 0
-            while j <= 3:
-                k = 0
-                while k <= 3:
-                    ijk = k + 4*(j + 4*i)
-                    a = A_ijk[ijk]
-                    f += a * u**i * v**j * w**k
-                    if i != 0:
-                        fx += i*a * u**(i-1) * v**j * w**k
-                    if j != 0:
-                        fy += j*a * u**i * v**(j-1) * w**k
-                    if k != 0:
-                        fz += k*a * u**i * v**j * w**(k-1)
-                    k += 1
-                j += 1
-            i += 1
-        return f,fx,fy,fz"""
         
     def interp1(self,x,y,z,doDouble=False):
         '''Do only on single points'''
@@ -259,8 +243,7 @@ class TriCubic(object):
         f = np.sum(inter)
         
         return f
-    
-            
+
     def get_bVec(self,i,j,k):
         '''Get the corner vec defined by f, fx,fy,fz,fxy,fxz,fyz,fxyz'''
         im = i - 1
@@ -531,256 +514,48 @@ class TriCubic(object):
                 [-12,-6,-6,-8,-3,-4,-4,-2,12,6,6,-4,3,-2,-2,-1,12,6,-6,8,-3,4,-4,-2,-12,-6,6,4,3,2,-2,-1,12,-6,6,8,-3,-4,4,-2,-12,6,-6,4,3,-2,2,-1,-12,6,6,-8,-3,4,4,-2,12,-6,-6,-4,3,2,2,-1],
                 [8,4,4,4,2,2,2,1,-8,-4,-4,4,-2,2,2,1,-8,-4,4,-4,2,-2,2,1,8,4,-4,-4,-2,-2,2,1,-8,4,-4,-4,2,2,-2,1,8,-4,4,-4,-2,2,-2,1,8,-4,-4,4,2,-2,-2,1,-8,4,4,4,-2,-2,-2,1]],dtype=np.double)
 
-def generateBinv():
-    from sympy import symbols, Rational, Matrix
-    from sympy.vector import Vector
 
-    x,y,z = symbols('x y z')
-    wholeFunc = Rational(0)
-    alphaVec = []
-    i = 0
-    while i <= 3:
-        j = 0
-        while j <= 3:
-            k = 0
-            while k <= 3:
-                a = symbols('a_{0}{1}{2}'.format(i,j,k))
-                alphaVec.append(a)
-                wholeFunc += a*x**Rational(i)*y**Rational(j)*z**Rational(k)
-                k += 1
-            j += 1
-        i += 1
-
-    print(alphaVec)
-
-    #order per corner f,fx,fy,fz,fxy,fxz,fyz,fxyz
-    cornerVec = Matrix([wholeFunc,
-                 wholeFunc.diff(x),
-                 wholeFunc.diff(y),
-                 wholeFunc.diff(z),
-                 wholeFunc.diff(x,y),
-                 wholeFunc.diff(x,z),
-                 wholeFunc.diff(y,z),
-                 wholeFunc.diff(x,y,z)])
-    #build B suchthat b = B.a
-
-    def getBRows(vec,alpha):
-        B = []
-        for el in vec:
-            row = []
-            for a in alpha:
-                k = Rational(el.diff(a))
-                row.append(k)
-            B.append(row)
-        print(len(vec))
-        return Matrix(B)
-
-    #x=0,y=0,z=0
-    row0 = getBRows(cornerVec.subs({x:0,y:0,z:0}),alphaVec)
-    row1 = getBRows(cornerVec.subs({x:0,y:0,z:1}),alphaVec)
-    row2 = getBRows(cornerVec.subs({x:0,y:1,z:0}),alphaVec)
-    row3 = getBRows(cornerVec.subs({x:0,y:1,z:1}),alphaVec)
-    row4 = getBRows(cornerVec.subs({x:1,y:0,z:0}),alphaVec)
-    row5 = getBRows(cornerVec.subs({x:1,y:0,z:1}),alphaVec)
-    row6 = getBRows(cornerVec.subs({x:1,y:1,z:0}),alphaVec)
-    row7 = getBRows(cornerVec.subs({x:1,y:1,z:1}),alphaVec)
-    Binv = Matrix([row0,row1,row2,row3,row4,row5,row6,row7]).inv()
-    string = "["
-    for i in range(64):
-        string += '['+('{:},'*63).format(*Binv[i,:64])+'{:}'.format(Binv[i,-1])+'],\n'
-    string += ']'
-    print(string)
-    
-def optimizeBvecFormation():
-    from sympy import symbols, Matrix
-    from sympy import cse
-    
-    def index1(i):
-        str = ''
-        if i == -1:
-            str += 'm'
-        if i == 0:
-            str += 'z'
-        if i == 1:
-            str += 'p'
-        if i == 2:
-            str += 'P'
-        return str
-    
-    def index2(i):
-        str = ''
-        if i == -1:
-            str += 'm'
-        if i == 0:
-            str += 'z'
-        if i == 1:
-            str += 'p'
-        if i == 2:
-            str += 'P'
-        return str
-    
-    def index(i,j,k):
-        str = ''
-        if i == -1:
-            str += 'm'
-        if i == 0:
-            str += 'z'
-        if i == 1:
-            str += 'p'
-        if i == 2:
-            str += 'P'
-        if j ==-1:
-            str += 'm'
-        if j == 0:
-            str += 'z'
-        if j == 1:
-            str += 'p'
-        if j == 2:
-            str += 'P'
-        if k ==-1:
-            str+='m'
-        if k == 0:
-            str += 'z'
-        if k == 1:
-            str += 'p'
-        if k == 2:
-            str += 'P'
-        return str
-
-    vec = []
-
-    i = 0
-    while i <= 1:
-        j = 0
-        while j <= 1:
-            k = 0
-            while k <= 1:
-                #f
-                vec.append(symbols('f_{0}'.format(index(i,j,k))))
-                
-                x12 = symbols('x_{0}'.format(index1(i+1))) - symbols('x_{0}'.format(index1(i-1)))
-                y12 = symbols('y_{0}'.format(index1(j+1))) - symbols('y_{0}'.format(index1(j-1)))
-                z12 = symbols('z_{0}'.format(index1(k+1))) - symbols('z_{0}'.format(index1(k-1)))
-                #fx,fy,fz
-                vec.append((symbols('f_{0}'.format(index(i+1,j,k))) - symbols('f_{0}'.format(index(i-1,j,k))) )/x12)
-                vec.append((symbols('f_{0}'.format(index(i,j+1,k))) - symbols('f_{0}'.format(index(i,j-1,k))) )/y12)
-                vec.append((symbols('f_{0}'.format(index(i,j,k+1))) - symbols('f_{0}'.format(index(i,j,k-1))) )/z12)
-
-                #fxy,fxz,fyz
-                vec.append((((symbols('f_{0}'.format(index(i+1,j+1,k))) - symbols('f_{0}'.format(index(i-1,j+1,k))) )/x12)-((symbols('f_{0}'.format(index(i+1,j-1,k))) - symbols('f_{0}'.format(index(i-1,j-1,k))) )/x12))/y12)
-                vec.append((((symbols('f_{0}'.format(index(i+1,j,k+1))) - symbols('f_{0}'.format(index(i-1,j,k+1))) )/x12)-((symbols('f_{0}'.format(index(i+1,j,k-1))) - symbols('f_{0}'.format(index(i-1,j,k-1))) )/x12))/z12)
-                vec.append((((symbols('f_{0}'.format(index(i,j+1,k+1))) - symbols('f_{0}'.format(index(i,j-1,k+1))) )/y12)-((symbols('f_{0}'.format(index(i,j+1,k-1))) - symbols('f_{0}'.format(index(i,j-1,k-1))) )/y12))/z12)
-                
-                #fxyz
-                vec.append((((((symbols('f_{0}'.format(index(i+1,j+1,k+1))) - symbols('f_{0}'.format(index(i-1,j+1,k+1))) )/x12)-((symbols('f_{0}'.format(index(i+1,j-1,k+1))) - symbols('f_{0}'.format(index(i-1,j-1,k+1))) )/x12))/y12)-((((symbols('f_{0}'.format(index(i+1,j+1,k-1))) - symbols('f_{0}'.format(index(i-1,j+1,k-1))) )/x12)-((symbols('f_{0}'.format(index(i+1,j-1,k-1))) - symbols('f_{0}'.format(index(i-1,j-1,k-1))) )/x12))/y12))/z12)         
-
-                k += 1
-            j += 1
-        i += 1
-    vec = Matrix(vec)
-
-    cseFunc = cse(vec,optimizations='basic')
-    #generate the indices
-    lines = ['im = i - 1','iz = i','ip = i + 1','iP = i + 2',
-            'jm = j - 1','jz = j','jp = j + 1','jP = j + 2',
-            'km = k - 1','kz = k','kp = k + 1','kP = k + 2']
-    i = -1
-    while i <= 2:
-        j = -1
-        while j <= 2:
-            k = -1
-            while k <= 2:
-                var = index(i,j,k)
-                line = "{0} = self.index(i{1},j{2},k{3})".format(index(i,j,k),index2(i),index2(j),index2(k))
-                lines.append(line)
-                k += 1
-            j += 1
-        i += 1
-    def replaceIndices(f):
-        i = -1
-        while i <= 2:
-            j = -1
-            while j <= 2:
-                k = -1
-                while k <= 2:
-                    var = index(i,j,k)
-                    f = f.replace(var,'[{0}]'.format(var))
-                    k += 1
-                j += 1
-            i += 1
-        return f
-    def replaceIndices2(f):
-        f = f.replace('x_m','self.xvec[im]')
-        f = f.replace('x_z','self.xvec[iz]')
-        f = f.replace('x_p','self.xvec[ip]')
-        f = f.replace('x_P','self.xvec[iP]')
-        f = f.replace('y_m','self.yvec[jm]')
-        f = f.replace('y_z','self.yvec[jz]')
-        f = f.replace('y_p','self.yvec[jp]')
-        f = f.replace('y_P','self.yvec[jP]')
-        f = f.replace('z_m','self.zvec[km]')
-        f = f.replace('z_z','self.zvec[kz]')
-        f = f.replace('z_p','self.zvec[kp]')
-        f = f.replace('z_P','self.zvec[kP]')
-        return f
-        
-    for expr in cseFunc[0]:
-        f = str(expr[1])
-        f = replaceIndices(f)
-        f = replaceIndices2(f)
-        f = f.replace('f_','self.m')
-        line = '{0} = {1}'.format(expr[0], f)
-        lines.append(line)
-        
-    bvec = str(cseFunc[1][0].transpose())
-    bvec = bvec.replace('Matrix([','bvec = np.array(')
-    bvec = bvec.replace('])',')')
-    bvec = bvec.replace(',',',\n')
-    bvec = replaceIndices(bvec)
-    bvec = replaceIndices2(bvec)
-    bvec = bvec.replace('f_','self.m')
-    lines.append(bvec)
-    code = ''
-    for line in lines:
-        code += line+'\n'
-    print(code)
 
 def testResult():
-    xvec = np.linspace(0,1,40)
-    yvec = np.linspace(-1,5,70)
-    zvec = np.linspace(0,1,50)
+    from sympy import exp,sqrt,sin,symbols,lambdify
+    x,y,z = symbols('x y z')
+    #define the test function - no singularities 
+    func = sin(2*np.pi*x*5)*sin(2*np.pi*y*z*10)*sin(2*np.pi*z*2*x)
+    f = lambdify((x,y,z),func,'numpy')
+    fx = lambdify((x,y,z),func.diff(x),'numpy')
+    fy = lambdify((x,y,z),func.diff(y),'numpy')
+    fz = lambdify((x,y,z),func.diff(z),'numpy')
+    fxy = lambdify((x,y,z),func.diff(x).diff(y),'numpy')
+    fxz = lambdify((x,y,z),func.diff(x).diff(z),'numpy')
+    fyz = lambdify((x,y,z),func.diff(y).diff(z),'numpy')
+    xvec = np.linspace(0,1,200)
+    yvec = np.linspace(0,1,100)
+    zvec = np.linspace(0,1,300)
     X,Y,Z = np.meshgrid(xvec,yvec,zvec,indexing='ij')
-    M = X**2*Y*Z
-    print (M.shape)
+    M = f(X,Y,Z)
     tci = TriCubic(xvec,yvec,zvec,M)
-    tci.checkIndexing(M)
-    print(M[20,20,20])
-    print(2*(xvec[20]+0.0001)*(yvec[20]+0.0001)*(zvec[20]+0.0001))
-    print((xvec[20]+0.0001)**2*(zvec[20]+0.0001))
-    print((xvec[20]+0.0001)**2*(yvec[20]+0.0001))
-    print(2*(xvec[20]+0.0001)*(zvec[20]+0.0001))
-    print(2*(xvec[20]+0.0001)*(yvec[20]+0.0001))
-    print((xvec[20]+0.0001)**2)
-    get_ipython().magic(u'timeit -n 100 tci.interp3(xvec[20]+0.0001,yvec[20]+0.0001,zvec[20]+0.0001,doDouble=True)')
+    for i in range(20):
+        x,y,z = np.random.uniform(size=3)
+        f_,fx_,fy_,fz_,fxy_,fxz_,fyz_ = tci.interp3(x,y,z,doDouble=True)
+        print("fractional errors at:",x,y,z)
+        print("f:",(f(x,y,z) - f_)/f(x,y,z))
+        print("fx:",(fx(x,y,z) - fx_)/fx(x,y,z))
+        print("fy:",(fy(x,y,z) - fy_)/fy(x,y,z))
+        print("fz:",(fz(x,y,z) - fz_)/fz(x,y,z))
+        print("fxy:",(fxy(x,y,z) - fxy_)/fxy(x,y,z))
+        print("fxz:",(fxz(x,y,z) - fxz_)/fxz(x,y,z))
+        print("fyz:",(fyz(x,y,z) - fyz_)/fyz(x,y,z))
+        
+    
     
 if __name__=='__main__':
+    np.random.seed(1234)
     #generateBinv()
     #optimizeBvecFormation()
-    #testResult()
-    xvec = np.linspace(0,1,40)
-    yvec = np.linspace(-1,5,70)
-    zvec = np.linspace(0,1,50)
-    X,Y,Z = np.meshgrid(xvec,yvec,zvec,indexing='ij')
-    M = X**2*Y*Z
-    print (M.shape)
-    tci = TriCubic(xvec,yvec,zvec,M)
-    tci.checkIndexing(M)
-    print(M[20,20,20])
-    print(2*(xvec[20]+0.0001)*(yvec[20]+0.0001)*(zvec[20]+0.0001))
-    print((xvec[20]+0.0001)**2*(zvec[20]+0.0001))
-    print((xvec[20]+0.0001)**2*(yvec[20]+0.0001))
-    print(2*(xvec[20]+0.0001)*(zvec[20]+0.0001))
-    print(2*(xvec[20]+0.0001)*(yvec[20]+0.0001))
-    print((xvec[20]+0.0001)**2)
-    get_ipython().magic(u'timeit -n 100 tci.interp3(xvec[20]+0.0001,yvec[20]+0.0001,zvec[20]+0.0001,doDouble=False)')
+    testResult()
+
+
+# In[ ]:
+
+
 

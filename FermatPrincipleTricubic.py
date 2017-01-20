@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[7]:
+# In[1]:
 
 import numpy as np
 from scipy.integrate import odeint
@@ -35,7 +35,7 @@ class Fermat(object):
             return
         
     def loadFunc(self,file):
-        '''Load symbolic functions'''
+        '''Load the model given in `file`'''
         data = np.load(file)
         if 'ne' in data.keys():
             ne = data['ne']
@@ -58,13 +58,12 @@ class Fermat(object):
     def ne2n(self,neTCI):
         '''Analytically turn electron density to refractive index. Assume ne in m^-3'''
         self.neTCI = neTCI
-        #convert to 
+        #copy object
         self.nTCI = neTCI.copy()
+        #inplace change to refractive index
         self.nTCI.m *= -8.980**2/self.frequency**2
         self.nTCI.m += 1.
         self.nTCI.m = np.sqrt(self.nTCI.m)
-        print(self.neTCI.m)
-        print(self.nTCI.m)
         #wp = 5.63e4*np.sqrt(ne/1e6)/2pi#Hz^2 m^3 lightman p 226
         return self.nTCI
     
@@ -109,93 +108,49 @@ class Fermat(object):
     def jacODE(self,y,t,*args):
         '''return d ydot / d y, with derivatives down column for speed'''
         px,py,pz,x,y,z,s = y
-        n,nx,ny,nz,nxy,nxz,nyz = self.nTCI.interp3(x,y,z,doDouble = True)
-        j = np.zeros([7,7])
+        n,nx,ny,nz,nxy,nxz,nyz = self.nTCI.interp3(x,y,z,doDouble=True)
+        nxx,nyy,nzz = 0.,0.,0.
         
         if self.type == 'z':
-            #pxdot/px = 0
-            #pxdot/py = 0
-            #pxdot/pz
-            j[2,0] = -nx*n/pz**2
-            #pxdot/x
-            j[3,0] = nx*nx/pz
-            #pxdot/y
-            j[4,0] = nxy*n/pz + nx*ny/pz
-            #pxdot/z
-            j[5,0] = nxz*n/pz + nx*nz/pz
-            
-            #py
-            #pxdot/px = 0
-            #pxdot/py = 0
-            #pydot/pz
-            j[2,1] = -ny*n/pz**2
-            #pydot/x
-            j[3,1] = nxy*n/pz + ny*nx/pz
-            #pydot/y
-            j[4,1] = ny*ny/pz
-            #pxdot/z
-            j[5,1] = nyz*n/pz + ny*nz/pz
-            
-            #pz
-            #pzdot/px = 0
-            #pzdot/py = 0
-            #pzdot/pz
-            j[2,2] = -nz*n/pz**2
-            #pzdot/x
-            j[3,2] = nxz*n/pz + nz*nx/pz
-            #pzdot/y
-            j[4,2] = nyz*n/pz + nz*ny/pz
-            #pxdot/z
-            j[5,2] = nz*nz/pz
-            
-            #xdot/px
-            j[0,3] = 1./pz
-            #xdot/py = 0
-            #xdot/pz
-            j[2,3] = -px/pz**2
-            #ydot/px = 0
-            #ydot/py
-            j[1,4] = 1./pz
-            #ydot/pz
-            j[2,4] = -py/pz**2
-            
-            #zdot all = 0
-            
-            #sdot/pz
-            j[2,6] = -n/pz**2
-            #sdot/x
-            j[3,6] = nx/pz
-            j[4,6] = ny/pz
-            j[5,6] = nz/pz
+            x0 = n
+            x1 = nx
+            x2 = pz**(-2)
+            x3 = x0*x2
+            x4 = 1./pz
+            x5 = ny
+            x6 = x4*(x0*nxy + x1*x5)
+            x7 = nz
+            x8 = x4*(x0*nxz + x1*x7)
+            x9 = x4*(x0*nyz + x5*x7)
+            jac = np.array([[ 0,  0, -x1*x3, x4*(x0*nxx + x1**2),x6, x8, 0.],
+                            [ 0,  0, -x3*x5,x6, x4*(x0*nyy + x5**2), x9, 0.],
+                            [ 0,  0, -x3*x7,x8, x9, x4*(x0*nzz + x7**2), 0.],
+                            [x4,  0, -px*x2, 0, 0,  0, 0.],
+                            [ 0, x4, -py*x2, 0, 0, 0, 0.],
+                            [ 0,  0, 0, 0, 0, 0, 0.],
+                            [ 0,  0,-x3,x1*x4, x4*x5, x4*x7, 0.]])
         
         if self.type == 's':
-            #pxdot
-            j[4,0] = nxy
-            j[5,0] = nxz
-            #pydot
-            j[3,1] = nxy
-            j[5,1] = nyz
-            #pzdot
-            j[3,2] = nxz
-            j[4,2] = nyz
-            #xdot
-            j[0,3] = 1./n
-            j[3,3] = -px/n**2 * nx
-            j[4,3] = -px/n**2 * ny
-            j[5,3] = -px/n**2 * nz
-            #ydot
-            j[1,4] = 1./n
-            j[3,4] = -py/n**2 * nx
-            j[4,4] = -py/n**2 * ny
-            j[5,4] = -py/n**2 * nz
-            #zdot
-            j[2,5] = 1./n
-            j[3,5] = -pz/n**2 * nx
-            j[4,5] = -pz/n**2 * ny
-            j[5,5] = -pz/n**2 * nz
-            #sdot all = 0
-            
-        return j
+            x0 = n
+            x1 = nxy
+            x2 = nxz
+            x3 = nyz
+            x4 = 1./x0
+            x5 = nx
+            x6 = x0**(-2)
+            x7 = px*x6
+            x8 = ny
+            x9 = nz
+            x10 = py*x6
+            x11 = pz*x6
+            jac = np.array([[ 0,  0,  0, nxx, x1, x2, 0.],
+                            [ 0,  0,  0, x1, nyy, x3, 0.],
+                            [ 0,  0,  0, x2, x3, nzz, 0.],
+                            [x4,  0,  0, -x5*x7, -x7*x8, -x7*x9, 0.],
+                            [ 0, x4,  0, -x10*x5, -x10*x8, -x10*x9, 0.],
+                            [ 0,  0, x4, -x11*x5, -x11*x8, -x11*x9, 0.],
+                            [ 0,  0,  0, 0, 0, 0, 0.]])
+        return jac
         
     def integrateRay(self,X0,direction,tmax,time = 0,N=100):
         '''Integrate rays from x0 in initial direction where coordinates are (r,theta,phi)'''
@@ -234,8 +189,7 @@ def generateKernel(gFile,forwardKernelParamDict):
         J.append(j.subs(forwardKernelParamDict))
     return {'G':G,'J':J}
 
-def plotWavefront(neTCI,rays,N=128,dx=None,dy=None,dz=None,save=False):
-    assert N>0,"resolution too small N = {0}".format(N)
+def plotWavefront(neTCI,rays,save=False):
     xmin = neTCI.xvec[0]
     xmax = neTCI.xvec[-1]
     ymin = neTCI.yvec[0]
@@ -243,18 +197,18 @@ def plotWavefront(neTCI,rays,N=128,dx=None,dy=None,dz=None,save=False):
     zmin = neTCI.zvec[0]
     zmax = neTCI.zvec[-1]
     
-    if dx is None:
-        dx = (xmax - xmin)/(N - 1)
-    if dy is None:
-        dy = (ymax - ymin)/(N-1)
-    if dz is None:
-        dz = (zmax - zmin)/(N-1)
-    
     X,Y,Z = np.mgrid[xmin:xmax:len(neTCI.xvec)*1j,
                      ymin:ymax:len(neTCI.yvec)*1j,
                      zmin:zmax:len(neTCI.zvec)*1j]
+    
+    #reshape array
     data = neTCI.m.reshape([len(neTCI.xvec),len(neTCI.yvec),len(neTCI.zvec)])
-        
+    l = mlab.pipeline.volume(mlab.pipeline.scalar_field(X,Y,Z,data))#,vmin=min, vmax=min + .5*(max-min))
+    l._volume_property.scalar_opacity_unit_distance = min((xmax-xmin)/4.,(ymax-ymin)/4.,(zmax-zmin)/4.)
+    l._volume_property.shade = False
+    #mlab.contour3d(X,Y,Z,data,contours=5,opacity=0.2)
+    mlab.colorbar()
+    
     def getWave(rays,idx):
         xs = np.zeros(len(rays))
         ys = np.zeros(len(rays))
@@ -267,72 +221,105 @@ def plotWavefront(neTCI,rays,N=128,dx=None,dy=None,dz=None,save=False):
             ridx += 1
         return xs,ys,zs
     
-    nt = np.size(rays[0]['x'])
-    #mlab.contour3d(X,Y,Z,data,contours=5,opacity=0.2)
-    l = mlab.pipeline.volume(mlab.pipeline.scalar_field(X,Y,Z,data))#,vmin=min, vmax=min + .5*(max-min))
-    l._volume_property.scalar_opacity_unit_distance = min((xmax-xmin)/4.,(ymax-ymin)/4.,(zmax-zmin)/4.)
-    l._volume_property.shade = False
-    for ray in rays:
-        mlab.plot3d(ray["x"],ray["y"],ray["z"],tube_radius=1.5)
-    mlab.colorbar()
-    #mlab.points3d(0,0,0,scale_mode='vector', scale_factor=10.)
-    plt = mlab.points3d(*getWave(rays,0),color=(1,0,0),scale_mode='vector', scale_factor=10.)
-    mlab.move(-200,0,0)
-    view = mlab.view()
-    @mlab.animate(delay=100)
-    def anim():
-        f = mlab.gcf()
-        save = False
-        while True:
-            i = 0
-            while i < nt:
-                #print("updating scene")
-                xs,ys,zs = getWave(rays,i)
-                plt.mlab_source.set(x=xs,y=ys,z=zs)
-                #mlab.view(*view)
-                if save:
-                    #mlab.view(*view)
-                    mlab.savefig('figs/wavefronts/wavefront_{0:04d}.png'.format(i),magnification = 2)#size=(1920,1080))
-                #f.scene.render()
-                i += 1
-                yield
+    if rays is not None:
+        for ray in rays:
+            mlab.plot3d(ray["x"],ray["y"],ray["z"],tube_radius=1.5)
+        plt = mlab.points3d(*getWave(rays,0),color=(1,0,0),scale_mode='vector', scale_factor=10.)
+        #mlab.move(-200,0,0)
+        view = mlab.view()
+        @mlab.animate(delay=100)
+        def anim():
+            nt = len(rays[0]["s"])
+            f = mlab.gcf()
             save = False
-    anim()
+            while True:
+                i = 0
+                while i < nt:
+                    #print("updating scene")
+                    xs,ys,zs = getWave(rays,i)
+                    plt.mlab_source.set(x=xs,y=ys,z=zs)
+                    #mlab.view(*view)
+                    if save:
+                        #mlab.view(*view)
+                        mlab.savefig('figs/wavefronts/wavefront_{0:04d}.png'.format(i))#,magnification = 2)#size=(1920,1080))
+                    #f.scene.render()
+                    i += 1
+                    yield
+                save = False
+        anim()
     mlab.show()
     if save:
-        pass
+        return
         import os
         os.system('ffmpeg -r 10 -f image2 -s 1900x1080 -i figs/wavefronts/wavefront_%04d.png -vcodec libx264 -crf 25  -pix_fmt yuv420p figs/wavefronts/wavefront.mp4')
     
+def createPrioriModel(iri = None):
+    if iri is None:
+        iri = IriModel()
+    eastVec = np.linspace(-200,200,30)
+    northVec = np.linspace(-200,200,40)
+    upVec = np.linspace(-10,3000,100)
+    E,N,U = np.meshgrid(eastVec,northVec,upVec,indexing='ij')
+    #get the points in ITRS frame
+    points = ac.SkyCoord(E.flatten()*au.km,N.flatten()*au.km,U.flatten()*au.km,frame=iri.enu).transform_to('itrs').cartesian.xyz.to(au.km).value
+    
+    #generate cartesian grid in ITRS frame
+    Nx = int(np.ceil((np.max(points[0,:]) - np.min(points[0,:]))/30.))
+    Ny = int(np.ceil((np.max(points[1,:]) - np.min(points[1,:]))/30.))
+    Nz = int(np.ceil((np.max(points[2,:]) - np.min(points[2,:]))/30.))
 
+    xvec = np.linspace(np.min(points[0,:]),np.max(points[0,:]),Nx)
+    yvec = np.linspace(np.min(points[1,:]),np.max(points[1,:]),Ny)
+    zvec = np.linspace(np.min(points[2,:]),np.max(points[2,:]),Nz)
+    #ij indexing
+    X,Y,Z = np.mgrid[np.min(points[0,:]):np.max(points[0,:]):1j*Nx,
+                     np.min(points[1,:]):np.max(points[1,:]):1j*Ny,
+                     np.min(points[2,:]):np.max(points[2,:]):1j*Nz]
+    #X,Y,Z = np.meshgrid(xvec,yvec,zvec,indexing='ij')
+    #Get values at points
+    ne = iri.evaluate(X,Y,Z)
+    print("created an a priori cube of shape: {0}".format(ne.shape))
+    return xvec,yvec,zvec,ne
+    
+def plotModel(neTCI,save=False):
+    '''Plot the model contained in a tricubic interpolator (a convienient container for one)'''
+    xmin = neTCI.xvec[0]
+    xmax = neTCI.xvec[-1]
+    ymin = neTCI.yvec[0]
+    ymax = neTCI.yvec[-1]
+    zmin = neTCI.zvec[0]
+    zmax = neTCI.zvec[-1]
+    
+    X,Y,Z = np.mgrid[xmin:xmax:len(neTCI.xvec)*1j,
+                     ymin:ymax:len(neTCI.yvec)*1j,
+                     zmin:zmax:len(neTCI.zvec)*1j]
+    
+    #reshape array or build to gauantee shape
+    data = neTCI.m.reshape([len(neTCI.xvec),len(neTCI.yvec),len(neTCI.zvec)])
+    data2 = np.zeros(np.size(X))
+    i = 0
+    for x,y,z in zip(X.flatten(),Y.flatten(),Z.flatten()):
+        data2[i] = neTCI.interp1(x,y,z)
+        i += 1
+    data2 = data2.reshape(X.shape)
+    print (data,data2)
+    l = mlab.pipeline.volume(mlab.pipeline.scalar_field(X,Y,Z,data))#,vmin=min, vmax=min + .5*(max-min))
+    l._volume_property.scalar_opacity_unit_distance = min((xmax-xmin)/4.,(ymax-ymin)/4.,(zmax-zmin)/4.)
+    l._volume_property.shade = False
+    #mlab.contour3d(X,Y,Z,data,contours=5,opacity=0.2)
+    mlab.colorbar()
+    mlab.show()
+    
 def testSweep():
     iri = IriModel()
-    xvec = np.linspace(-100,100,10)
-    yvec = np.linspace(-100,100,11)
-    zvec = np.linspace(0,1500,50)
-    
-    x0,y0,z0 = iri.enu.location.geocentric
-    xvec = np.linspace(x0.to(au.km).value-500,x0.to(au.km).value+500,50)
-    yvec = np.linspace(y0.to(au.km).value - 500,y0.to(au.km).value + 500,50)
-    zvec = np.linspace(z0.to(au.km).value-500,z0.to(au.km).value+500,50)
-    X,Y,Z = np.meshgrid(xvec,yvec,zvec,indexing='ij')
-    print(iri.enu.location.geodetic)
-    points = ac.SkyCoord(X.flatten()*au.km,Y.flatten()*au.km,Z.flatten()*au.km,frame='itrs').transform_to(iri.enu).cartesian.xyz.value
-    #points = []
-    #for x,y,z in zip(X.flatten(),Y.flatten(),Z.flatten()):
-    #    points.append(ac.SkyCoord(x*au.km,y*au.km,y*au.km,frame=iri.enu).transform_to('itrs').cartesian.xyz.to(au.km).value)
-    #points = np.array(points)
-    print(points)
-    #X = points[0,:].reshape(X.shape)
-    #Y = points[1,:].reshape(Y.shape)
-    #Z = points[2,:].reshape(Z.shape)
-    #X,Y,Z=np.meshgrid(xvec,yvec,zvec,indexing='ij')
-    ne = iri.evaluate(X,Y,Z)
+    xvec,yvec,zvec,ne = createPrioriModel(iri)
+    print("creating TCI object")
     neTCI = TriCubic(xvec,yvec,zvec,ne)
-    
+    plotModel(neTCI)
+    return
+    print("creating fermat object")
     f =  Fermat(neTCI = neTCI,type = 's')
-
-    theta = np.linspace(-np.pi/8.,np.pi/8.,25)
+    theta = np.linspace(-np.pi/15.,np.pi/15.,25)
     #phi = np.linspace(0,2*np.pi,6)
     rays = []
     origin = ac.ITRS(iri.enu.location).cartesian.xyz.to(au.km).value
@@ -343,10 +330,10 @@ def testSweep():
                                     np.sin(p),
                                     1.,frame=iri.enu).transform_to('itrs').cartesian.xyz.value
             x,y,z,s = f.integrateRay(origin,direction,1000,time=0.)
-            rays.append({'x':x,'y':y,'z':z})
+            rays.append({'x':x,'y':y,'z':z,'s':s})
     print("time:",(tictoc()-t1)/len(rays))
     #print(rays)
-    #plotWavefront(neTCI,rays,N=128,dx=None,dy=None,dz=None,save=False)
+    plotWavefront(neTCI,rays,save=False)
     #plotWavefront(f.nFunc.subs({'t':0}),rays,*getSolitonCube(sol),save = False)
     #plotFuncCube(f.nFunc.subs({'t':0}), *getSolitonCube(sol),rays=rays)
 
@@ -359,7 +346,7 @@ if __name__=='__main__':
     #testcseLam()
 
 
-# In[15]:
+# In[ ]:
 
 
 

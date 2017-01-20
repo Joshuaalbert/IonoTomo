@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[2]:
+# In[15]:
 
 import glob
 from RadioArray import RadioArray
@@ -16,6 +16,12 @@ def getDatumIdx(antIdx,dirIdx,timeIdx,numDirections,numTimes):
     '''standarizes indexing'''
     idx = antIdx*numDirections*numTimes + dirIdx*numTimes + timeIdx
     return idx
+
+def getDatum(datumIdx,numDirections,numTimes):
+    timeIdx = datumIdx % numTimes
+    dirIdx = (datumIdx - timeIdx)/numTimes % numDirections
+    antIdx = (datumIdx - timeIdx - dirIdx*numTimes)/numDirections/numTimes
+    return antIdx,dirIdx,timeIdx    
     
 def PrepareData(infoFile,dataFolder,timeStart = 0, timeEnd = 0,arrayFile='arrays/lofar.hba.antenna.cfg',load=False):
     '''Prepare data for continuous inversion. RadioArray, dobs, Cd, and rays.
@@ -152,5 +158,34 @@ if __name__ == '__main__':
     dataDict = PrepareData(infoFile='SB120-129/WendysBootes.npz',
                            dataFolder='SB120-129/',
                            timeStart = 0, timeEnd = 0,
-                           arrayFile='arrays/lofar.hba.antenna.cfg',load=False)
+                           arrayFile='arrays/lofar.hba.antenna.cfg',load=True)
+    rays = dataDict['rays']
+    numDirections = dataDict['numDirections']
+    numTimes = dataDict['numTimes']
+    numAntennas = dataDict['numAntennas']
+    data = dataDict['dtec']
+    data -= np.min(data)
+    data /= np.max(data)
+    import pylab as plt
+    #f,ax = plt.subplots(int(np.ceil(np.sqrt(numAntennas))),int(np.ceil(np.sqrt(numAntennas))))
+    ax = plt.subplot(111)
+    print(ax)
+    i = 0
+    while i < len(rays):
+        datumIdx = rays[i].id
+        antIdx,dirIdx,timeIdx = getDatum(datumIdx,numDirections,numTimes)
+        dir = rays[i].dir
+        if antIdx==0:
+            print(data[i])
+            ax.scatter(dir[0],dir[1],c=data[i],s=(data*50)**2,vmin=0.2,vmax=0.5)
+        
+        i += 1
+    plt.show()
+        
+        
+
+
+# In[ ]:
+
+
 

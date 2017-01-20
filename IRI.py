@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[3]:
+# In[4]:
 
 import numpy as np
 from sympy import Rational,symbols,exp,lambdify,sqrt,tanh,log,pi
@@ -17,7 +17,7 @@ from TricubicInterpolation import TriCubic
 import tempfile
 
 def neQuick(h,No=2.2e11,hmax=368.,Ho=50.):
-    '''Ne quick model'''
+    '''Ne quick model for one layer'''
     res = np.zeros_like(h)
     g = 1./7.
     rfac = 100.
@@ -34,88 +34,26 @@ def neQuick(h,No=2.2e11,hmax=368.,Ho=50.):
     return res
 
 def xef1f2(h):
-    f2 = neQuick(h1,No=2.2e11,hmax=359.,Ho=46.)
-    f1 = neQuick(h1,No=3e9,hmax=195.,Ho=20.)
-    e = neQuick(h1,No=3e9,hmax=90.,Ho=10.)
+    f2 = neQuick(h,No=2.2e11,hmax=359.,Ho=46.)
+    f1 = neQuick(h,No=3e9,hmax=195.,Ho=20.)
+    e = neQuick(h,No=3e9,hmax=90.,Ho=10.)
     return f2 + f1 + e
 
-def symbolicNeQuick(h, No,hmax,Ho):
-    g = Rational(1,7)
-    rfac = Rational(100)
-    #h = symbols('h')
-    dh = h - hmax
-    g1 = g * dh# g*(h - hmax)
-    z = dh / (Ho * (Rational(1) + rfac * g1 / (rfac * Ho + g1))) #(h-hmax) / 
-    z = dh / (Ho * (Rational(1) + rfac * g1 / (rfac * Ho + g1))) #(h-hmax) / 
-    #a = Rational(1)/(dh**Rational(2) + rfac)
-    #b = g*(Rational(1) + Rational(1)/rfac)/(Rational(2)*a)
-    #c = -Ho - a*b**Rational(2)
-    #denom = a*(dh - b)**Rational(2) + c
-    #z = (rfac * Ho + g1) / (Ho * g*denom)
-    ee = exp(z)
-    return No*Rational(4)*ee/(Rational(1) + ee)**Rational(2)/(Rational(1) + exp(-(h*Rational(1,2)-Rational(1))))
-
-def symbolicExtendedNormal(h, nepeak,hmax,width,stretch=Rational(7)):
-    lam, mu, sigma = symbols('lam mu sigma')
-    return nepeak*exp(-(hmax - h)**2/width**2)
-    #mu = hmax - Rational(1)/lam
-    erf = tanh(log(Rational(2)) * sqrt(pi)* (mu + lam*sigma**Rational(2) - h)/(sqrt(Rational(2)) * sigma))
-    erfc = Rational(1) - erf
-    ee = exp(lam/Rational(2) * (Rational(2) * mu + lam * sigma**Rational(2) - Rational(2) * h))
-    a = Rational(1)/(ee * erfc).subs({'h':mu + Rational(1)/lam})
-    
-    return nepeak*(a*ee*erfc).subs({'mu':hmax - stretch,'lam':Rational(1)/stretch,'sigma':width})
- 
-def symbolicXef1f2ExtendedNormal(h = None):
-    if h is None:
-        h = symbols('h')
-    f2 = symbolicExtendedNormal(h,Rational(2.2e11),Rational(359),Rational(46))
-    f1 = symbolicExtendedNormal(h,Rational(3e9),Rational(195),Rational(20))
-    e = symbolicExtendedNormal(h,Rational(3e9),Rational(90),Rational(10))
-    return f2 + f1 + e
-
-def symbolicXef1f2NeQuick(h = None):
-    if h is None:
-        h = symbols('h')
-    f2 = symbolicNeQuick(h,No=Rational(2.2e11),hmax=Rational(359),Ho=Rational(46))
-    f1 = symbolicNeQuick(h,No=Rational(3e9),hmax=Rational(195),Ho=Rational(20))
-    e = symbolicNeQuick(h,No=Rational(3e9),hmax=Rational(90),Ho=Rational(10))
-    return f2 + f1 + e
-def symbolicSoliton(h, nepeak,hmax,width):
-    x = (h-hmax)/width
-    sech = Rational(2)/(exp(x) + exp(-x))
-    return nepeak*sech * exp(x*Rational(20,27))
 
 def symbolicChapman(h, nepeak,hmax,width):
     y = (h-hmax)/width
     return nepeak*exp(Rational(1,2)*(Rational(1) - y - exp(-y)))
 
-def symbolicXef1f2(h = None):
+
+def symbolicChapman_def1f2(h = None):
     if h is None:
         h = symbols('h')
-    f = symbolicSoliton(h,Rational(2e11),Rational(400),Rational(250))
-    f2 = symbolicSoliton(h,Rational(2e12),Rational(300),Rational(190))
-    f1 = symbolicSoliton(h,Rational(3e11),Rational(200),Rational(120))
-    e = symbolicSoliton(h,Rational(1e11),Rational(100),Rational(50))
-    d = symbolicSoliton(h,Rational(3e9),Rational(80),Rational(50))
-    return f + f2 + f1 + e + d
-
-def symbolicChapmanef1f2(h = None):
-    if h is None:
-        h = symbols('h')
-    f = symbolicChapman(h,Rational(1e10),Rational(450),Rational(250))
-    f2 = symbolicChapman(h,Rational(2e11),Rational(350),Rational(140))
-    f1 = symbolicChapman(h,Rational(3e10),Rational(170),Rational(80))
-    e = symbolicChapman(h,Rational(1e10),Rational(100),Rational(50))
-    d = symbolicChapman(h,Rational(3e9),Rational(80),Rational(50))
-    return f2 + f1 + e
-
-def ionosphereModel(h):
-    Nf1 = 10*4*np.exp((h-350)/50.)/(1 + np.exp((h-350)/50.))**2
-    res = Nf1    
-    Ne = 0.3*4*np.exp((h-85.)/50.)/(1 + np.exp((h-85.)/50.))**2
-    res += Ne
-    return res*5e10
+    #f = symbolicChapman(h,Rational(1e10),Rational(450),Rational(250))
+    f2 = symbolicChapman(h,Rational(2.2e11),Rational(359),Rational(46))
+    f1 = symbolicChapman(h,Rational(3e9),Rational(195),Rational(20))
+    e = symbolicChapman(h,Rational(3e9),Rational(90),Rational(10))
+    #d = symbolicChapman(h,Rational(3e9),Rational(80),Rational(50))
+    return f2 + f1 + e  + Rational(4.5e8)
     
 def ExampleIRI():
     d = np.genfromtxt('exampleIRI.txt',names=True)
@@ -123,36 +61,25 @@ def ExampleIRI():
     return d['height'],d['ne']
     
 def plotModels():
-    from sympy import simplify
-    #print(simplify(symbolicXef1f2()))
-    lam = lambdify(symbols('h'),symbolicChapmanef1f2(),'numpy')
+    lam = lambdify(symbols('h'),symbolicChapman_def1f2(),'numpy')
     
     import pylab as plt
     h1,ne1 = ExampleIRI()
-    plt.plot(h1,ne1,c='black',label='IRI')
-    ne2 = ionosphereModel(h1)
-    plt.plot(h1,ne2,c='red',label='simple')
-    ne3 = neQuick(h1,No=2.2e11,hmax=359.,Ho=46.) + neQuick(h1,No=3e9,hmax=195.,Ho=20.)+ neQuick(h1,No=3e9,hmax=90.,Ho=10.)
-    plt.plot(h1,ne3,c='blue',label='neQuick')
-    ne4 = lam(np.linspace(-100,2000,10000))
-    plt.plot(np.linspace(-100,2000,10000),ne4,c='green',label='neQuick_symbol')
+    plt.plot(h1,ne1,c='black',label='Ex. IRI')
+    ne3 = xef1f2(h1)
+    plt.plot(h1,ne3,c='blue',label='neQuick_ef1f2')
+    ne4 = lam(np.linspace(0,3000,10000))
+    plt.plot(np.linspace(0,3000,10000),ne4,c='green',label='symbolicChapman_def1f2')
     plt.legend(frameon=False)
-    plt.xlabel('Height (km)')
+    plt.xlabel('Height above surface (km)')
     plt.ylabel(r'Electron density $n_e$ (${\rm m}^{-3}$)')
     #plt.yscale('log')
     plt.grid()
     plt.title('Ionosphere Models')
     plt.show()
     
-    lam = lambdify(symbols('h'),symbolicXef1f2().diff('h'),'numpy')
-    
-    
-    ne4 = lam(np.linspace(-100,1000,1000))
-    plt.plot(np.linspace(-100,1000,1000),ne4,c='green',label='neQuick_symbol')
-
-    plt.show()
-    
 class Model(object):
+    '''Symbolic model object. '''
     def makeOrderList(self,paramDict):
         orderList = []
         for key in paramDict.keys():
@@ -224,6 +151,15 @@ class IriModel(ElectronContentModel):
                 'dhm' : np.random.uniform(low = 50, high = 80),
                 'dw' : np.random.uniform(low = 50,high = 60),
                 'nedm' : 10**np.random.uniform(low = 8,high=10)}
+        init = {'f2hm' : 360,
+                'f2w' : 46,
+                'nef2m' : 2.2e11,
+                'f1hm' : 195,
+                'f1w' : 20,
+                'nef1m' : 3e9,
+                'ehm' : 90,
+                'ew' : 10,
+                'neem' : 3e9}
         return init
     
     def makeSymbolicIri(self):
@@ -232,12 +168,12 @@ class IriModel(ElectronContentModel):
         R = Rational(int(self.radioArray.getCenter().spherical.distance.to(au.km).value))
         r = sqrt(x**(Rational(2))+y**(Rational(2))+z**(Rational(2)))
         h = r - R
-        f = symbolicChapman(h,*symbols('nefm fhm fw'))
+        #f = symbolicChapman(h,*symbols('nefm fhm fw'))
         f2 = symbolicChapman(h,*symbols('nef2m f2hm f2w'))
         f1 = symbolicChapman(h,*symbols('nef1m f1hm f1w'))
         e = symbolicChapman(h,*symbols('neem ehm ew'))
-        d = symbolicChapman(h,*symbols('nedm dhm dw'))
-        self.iriFunc = f + f2 + f1 + e + d
+        #d = symbolicChapman(h,*symbols('nedm dhm dw'))
+        self.iriFunc = f2 + f1 + e + Rational(4.5e8)
         return self.iriFunc
         
     def generateIri(self,paramVec=None):
@@ -414,32 +350,33 @@ def plotSolitonModel(solitonsModel):
     plotFuncCube(func,*getSolitonCube(solitonsModel),N=128,dx=None,dy=None,dz=None,rays=None)
     
 if __name__=='__main__':
-    mod = SolitonModel(3)
-    #print(cloudpickle.dumps(lambdify((),mod.generateSolitonsModel())))
-    print(mod.solitonsFunc)
-    #plotSolitonModel(mod)
-    #plotSoliton()
-    #from Symbolic import *
+    plotModels()
+    from ENUFrame import *
     iri = IriModel()
-    X,Y,Z = np.meshgrid([5000,6000,7000,8000],[5000,6000,7000,8000],[5000,6000,7000,8000])
-    print(iri.evaluate(X,Y,Z))
-    #print(cseLambdify(symbols('x y z'),iri.generateIRI()))
-    #sol = SolitonModel(4)
-    #sol.generateSolitonModel()
-    #plotFuncCube(sol.solitonModel.subs({'t':0}), *getSolitonCube(sol))
-    #plotModels()
-    e = 1.6021766208e-19#C
-    ep0 = 8.85418782e-12# m-3 kg-1 s4 A2
-    m = 9.10938356e-31#kg
-    c = 3e8
-    nu = 50e6
-    tec = 1e13*(1000*1000)/1e16
-    print(tec)
-    phase = e**2/(4*np.pi*ep0 * m * c * nu)*1e16
-    print(phase)
-    #offset of
-    da = 10./3600.*np.pi/180.#5 arcsec in rad
-    print(phase*tec* ( 1. - 1./np.cos(da)))
+    #print(iri.iriFunc)
+    print (iri.generateIri())
+    xvec = [0]
+    yvec = [0]
+    zvec = np.linspace(0,3000,10000)
+    X,Y,Z = np.meshgrid(xvec,yvec,zvec,indexing='ij')
+    points = ac.SkyCoord(X.flatten()*au.km,Y.flatten()*au.km,Z.flatten()*au.km,frame=iri.enu).transform_to('itrs').cartesian.xyz.to(au.km).value
+    
+    #for x,y,z in zip(X.flatten(),Y.flatten(),Z.flatten()):
+    #    points.append(ac.SkyCoord(x*au.km,y*au.km,y*au.km,frame=iri.enu).transform_to('itrs').cartesian.xyz.to(au.km).value)
+    #points = np.array(points)
+    xvec = np.linspace(np.min(points[0,:]),np.max(points[0,:]),len(xvec))
+    yvec = np.linspace(np.min(points[1,:]),np.max(points[1,:]),len(yvec))
+    zvec = np.linspace(np.min(points[2,:]),np.max(points[2,:]),len(zvec))
+    X,Y,Z = np.meshgrid(xvec,yvec,zvec)
+    #X = points[0,:].reshape(X.shape)
+    #Y = points[1,:].reshape(Y.shape)
+    #Z = points[2,:].reshape(Z.shape)
+    #X,Y,Z=np.meshgrid(xvec,yvec,zvec,indexing='ij')
+    ne = iri.evaluate(points[0,:],points[1,:],points[2,:])
+    print (ne)
+    import pylab as plt
+    plt.plot(np.linspace(0,3000,10000),ne)
+    plt.show()
     
     
 

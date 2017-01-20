@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[62]:
+# In[63]:
 
 from __future__ import (absolute_import, unicode_literals, division,
                         print_function)
@@ -189,14 +189,14 @@ if __name__ == '__main__':
     loc = ac.EarthLocation(x=6731*u.km,y=1*u.km,z=1*u.km)
     time = at.Time(1,format='gps')
     enu = ENU(obstime=time,location=loc)
-    print("With coord test:")
+    print("With dim test:")
     enucoords = ac.SkyCoord(east = np.array([0,1])*u.m,
                             north=np.array([0,1])*u.m,
                             up=np.array([0,1])*u.m,frame=enu)
     print (enucoords)
     print(enucoords.transform_to('itrs'))
     print(enucoords.transform_to('itrs').transform_to(enu))
-    print("Without coord test:")
+    print("Without dim test:")
     enucoords = ac.SkyCoord(east = np.array([0,1]),
                             north=np.array([0,1]),
                             up=np.array([0,1]),frame=enu)
