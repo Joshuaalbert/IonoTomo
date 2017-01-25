@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[1]:
+# In[ ]:
 
 import numpy as np
 from scipy.integrate import odeint
@@ -59,7 +59,7 @@ class Fermat(object):
         '''Analytically turn electron density to refractive index. Assume ne in m^-3'''
         self.neTCI = neTCI
         #copy object
-        self.nTCI = neTCI.copy()
+        self.nTCI = neTCI.copy(default=1.)
         #inplace change to refractive index
         self.nTCI.m *= -8.980**2/self.frequency**2
         self.nTCI.m += 1.
@@ -83,6 +83,10 @@ class Fermat(object):
         #print(y)
         px,py,pz,x,y,z,s = y
         n,nx,ny,nz = self.nTCI.interp3(x,y,z)
+        #print(n)
+        #n,nx,ny,nz = 1.,0,0,0
+        if (n>1):
+            print(x,y,z,n)
         if self.type == 'z':
             sdot = n / pz
             pxdot = nx*n/pz
@@ -108,9 +112,11 @@ class Fermat(object):
     def jacODE(self,y,t,*args):
         '''return d ydot / d y, with derivatives down column for speed'''
         px,py,pz,x,y,z,s = y
-        n,nx,ny,nz,nxy,nxz,nyz = self.nTCI.interp3(x,y,z,doDouble=True)
+        #n,nx,ny,nz,nxy,nxz,nyz = self.nTCI.interp3(x,y,z,doDouble=True)
         nxx,nyy,nzz = 0.,0.,0.
-        
+        #n,nx,ny,nz,nxy,nxz,nyz = 1.,0,0,0,0,0,0
+        if (n>1):
+            print(x,y,z,n)
         if self.type == 'z':
             x0 = n
             x1 = nx
@@ -252,83 +258,60 @@ def plotWavefront(neTCI,rays,save=False):
         return
         import os
         os.system('ffmpeg -r 10 -f image2 -s 1900x1080 -i figs/wavefronts/wavefront_%04d.png -vcodec libx264 -crf 25  -pix_fmt yuv420p figs/wavefronts/wavefront.mp4')
+
+def plotModel(neTCI,save=False):
+    '''Plot the model contained in a tricubic interpolator (a convienient container for one)'''
+    plotWavefront(neTCI,None,save=save)
     
 def createPrioriModel(iri = None):
     if iri is None:
         iri = IriModel()
-    eastVec = np.linspace(-200,200,30)
+    eastVec = np.linspace(-200,200,40)
     northVec = np.linspace(-200,200,40)
     upVec = np.linspace(-10,3000,100)
     E,N,U = np.meshgrid(eastVec,northVec,upVec,indexing='ij')
     #get the points in ITRS frame
-    points = ac.SkyCoord(E.flatten()*au.km,N.flatten()*au.km,U.flatten()*au.km,frame=iri.enu).transform_to('itrs').cartesian.xyz.to(au.km).value
+    #points = ac.SkyCoord(E.flatten()*au.km,N.flatten()*au.km,U.flatten()*au.km,frame=iri.enu).transform_to('itrs').cartesian.xyz.to(au.km).value
     
-    #generate cartesian grid in ITRS frame
-    Nx = int(np.ceil((np.max(points[0,:]) - np.min(points[0,:]))/30.))
-    Ny = int(np.ceil((np.max(points[1,:]) - np.min(points[1,:]))/30.))
-    Nz = int(np.ceil((np.max(points[2,:]) - np.min(points[2,:]))/30.))
+    ##generate cartesian grid in ITRS frame
+    #Nx = int(np.ceil((np.max(points[0,:]) - np.min(points[0,:]))/30.))
+    #Ny = int(np.ceil((np.max(points[1,:]) - np.min(points[1,:]))/30.))
+    #Nz = int(np.ceil((np.max(points[2,:]) - np.min(points[2,:]))/30.))
 
-    xvec = np.linspace(np.min(points[0,:]),np.max(points[0,:]),Nx)
-    yvec = np.linspace(np.min(points[1,:]),np.max(points[1,:]),Ny)
-    zvec = np.linspace(np.min(points[2,:]),np.max(points[2,:]),Nz)
-    #ij indexing
-    X,Y,Z = np.mgrid[np.min(points[0,:]):np.max(points[0,:]):1j*Nx,
-                     np.min(points[1,:]):np.max(points[1,:]):1j*Ny,
-                     np.min(points[2,:]):np.max(points[2,:]):1j*Nz]
+    #xvec = np.linspace(np.min(points[0,:]),np.max(points[0,:]),Nx)
+    #yvec = np.linspace(np.min(points[1,:]),np.max(points[1,:]),Ny)
+    #zvec = np.linspace(np.min(points[2,:]),np.max(points[2,:]),Nz)
+    #ij indexing - mgrid is that way by default
+    #X,Y,Z = np.mgrid[np.min(points[0,:]):np.max(points[0,:]):1j*Nx,
+    #                 np.min(points[1,:]):np.max(points[1,:]):1j*Ny,
+    #                 np.min(points[2,:]):np.max(points[2,:]):1j*Nz]
     #X,Y,Z = np.meshgrid(xvec,yvec,zvec,indexing='ij')
     #Get values at points
-    ne = iri.evaluate(X,Y,Z)
+    ne = iri.evaluate(E,N,U)
     print("created an a priori cube of shape: {0}".format(ne.shape))
-    return xvec,yvec,zvec,ne
-    
-def plotModel(neTCI,save=False):
-    '''Plot the model contained in a tricubic interpolator (a convienient container for one)'''
-    xmin = neTCI.xvec[0]
-    xmax = neTCI.xvec[-1]
-    ymin = neTCI.yvec[0]
-    ymax = neTCI.yvec[-1]
-    zmin = neTCI.zvec[0]
-    zmax = neTCI.zvec[-1]
-    
-    X,Y,Z = np.mgrid[xmin:xmax:len(neTCI.xvec)*1j,
-                     ymin:ymax:len(neTCI.yvec)*1j,
-                     zmin:zmax:len(neTCI.zvec)*1j]
-    
-    #reshape array or build to gauantee shape
-    data = neTCI.m.reshape([len(neTCI.xvec),len(neTCI.yvec),len(neTCI.zvec)])
-    data2 = np.zeros(np.size(X))
-    i = 0
-    for x,y,z in zip(X.flatten(),Y.flatten(),Z.flatten()):
-        data2[i] = neTCI.interp1(x,y,z)
-        i += 1
-    data2 = data2.reshape(X.shape)
-    print (data,data2)
-    l = mlab.pipeline.volume(mlab.pipeline.scalar_field(X,Y,Z,data))#,vmin=min, vmax=min + .5*(max-min))
-    l._volume_property.scalar_opacity_unit_distance = min((xmax-xmin)/4.,(ymax-ymin)/4.,(zmax-zmin)/4.)
-    l._volume_property.shade = False
-    #mlab.contour3d(X,Y,Z,data,contours=5,opacity=0.2)
-    mlab.colorbar()
-    mlab.show()
+    return eastVec,northVec,upVec,ne
+
     
 def testSweep():
+    '''Test the full system.'''
+    # The priori ionosphere 
     iri = IriModel()
-    xvec,yvec,zvec,ne = createPrioriModel(iri)
+    eastVec,northVec,upVec,ne = createPrioriModel(iri)
     print("creating TCI object")
-    neTCI = TriCubic(xvec,yvec,zvec,ne)
-    plotModel(neTCI)
-    return
+    neTCI = TriCubic(eastVec,northVec,upVec,ne)
     print("creating fermat object")
     f =  Fermat(neTCI = neTCI,type = 's')
+    print(np.min(f.nTCI.m),np.max(f.nTCI.m))
     theta = np.linspace(-np.pi/15.,np.pi/15.,25)
     #phi = np.linspace(0,2*np.pi,6)
     rays = []
-    origin = ac.ITRS(iri.enu.location).cartesian.xyz.to(au.km).value
+    origin = ac.ITRS(iri.enu.location).transform_to(iri.enu).cartesian.xyz.to(au.km).value
     t1 = tictoc()
     for t in theta:
         for p in theta:
             direction = ac.SkyCoord(np.sin(t),
                                     np.sin(p),
-                                    1.,frame=iri.enu).transform_to('itrs').cartesian.xyz.value
+                                    1.,frame=iri.enu).cartesian.xyz.value#.transform_to('itrs').cartesian.xyz.value
             x,y,z,s = f.integrateRay(origin,direction,1000,time=0.)
             rays.append({'x':x,'y':y,'z':z,'s':s})
     print("time:",(tictoc()-t1)/len(rays))
@@ -344,11 +327,6 @@ if __name__=='__main__':
     #testThreadedFermat()
     #testSmoothify()
     #testcseLam()
-
-
-# In[ ]:
-
-
 
 
 # In[ ]:

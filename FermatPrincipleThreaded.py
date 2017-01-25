@@ -24,8 +24,8 @@ import astropy.units as au
 import astropy.time as at
 
 #from multiprocessing import Pool
-#import dill
-#dill.settings['recurse'] = True
+import dill
+dill.settings['recurse'] = True
 #import sys
 #sys.setrecursionlimit(30000)
 
@@ -276,4 +276,95 @@ if __name__=='__main__':
     testThreadedFermat()
     #testSmoothify()
     #testcseLam()
+
+
+# In[1]:
+
+import numpy as np
+
+import dill
+dill.settings['recurse'] = True
+
+from sympy import symbols,sqrt,Rational,lambdify,Matrix,exp,cosh,cse,simplify,cos,sin
+from sympy.vector import CoordSysCartesian
+
+def createInitSolitonParam():
+    '''Create an initial random param for a soliton'''
+    #initial amp
+    amp = 10**np.random.uniform(low = 9.5, high = 10.5)#electron / m^3
+    #initial velcoity
+    maxVel = 350./3600.#100km/hour in km/s pi*(6300+350)*2/24.*0.2 (20% of solar pressure field movement)
+    initc = [np.random.uniform(low=-maxVel,high=maxVel),
+             np.random.uniform(low=-maxVel,high=maxVel),
+             np.random.uniform(low=-maxVel,high=maxVel)]
+                        
+    #initial  location of blobs
+    initx = [np.random.uniform(low=-100,high=100),
+             np.random.uniform(low=-100,high=100),
+             np.random.uniform(low=50,high=800)]
+    b = np.random.uniform(low = 10.,high=100.)
+
+    return {"A":np.sqrt(amp),
+                       "cx":initc[0],
+                       "cy":initc[1],
+                       "cz":initc[2],
+                       "x0":initx[0],
+                       "y0":initx[1],
+                       "z0":initx[2],
+                       "b":b
+                      }
+    
+solitonsFunc = None
+initSolitonsParams = {}
+i = 0
+while i < 100:
+    A = symbols ('A_{0}'.format(i))
+    cx = symbols ('cx_{0}'.format(i))
+    cy = symbols ('cy_{0}'.format(i))
+    cz = symbols ('cz_{0}'.format(i))
+    x0 = symbols ('x0_{0}'.format(i))
+    y0 = symbols ('y0_{0}'.format(i))
+    z0 = symbols ('z0_{0}'.format(i))
+    b = symbols ('b_{0}'.format(i))
+    i += 1
+    init = createInitSolitonParam()
+
+    initSolitonsParams[A.name] = init['A']
+    initSolitonsParams[cx.name] = init['cx']
+    initSolitonsParams[cy.name] = init['cy']
+    initSolitonsParams[cz.name] = init['cz']
+    initSolitonsParams[x0.name] = init['x0']
+    initSolitonsParams[y0.name] = init['y0']
+    initSolitonsParams[z0.name] = init['z0']
+    initSolitonsParams[b.name] = init['b']
+
+    x,y,z,t = symbols('x,y,z,t')
+
+    N = CoordSysCartesian('N')
+    c = cx*N.i + cy*N.j + cz*N.k  
+    X = x*N.i + y*N.j + z*N.k
+    X0 = x0*N.i + y0*N.j + z0*N.k
+    xx0 = X - t*c - X0
+    func = A*A* exp(-xx0.dot(xx0)/b**Rational(2))
+    if solitonsFunc is None:
+        solitonsFunc = func
+    else:
+        solitonsFunc += func
+
+print("Function: {0}".format(solitonsFunc))
+solitonsFunc = solitonsFunc.subs(initSolitonsParams)
+print("Lambdifying")
+lam = lambdify(symbols('x,y,z,t'),solitonsFunc,"numpy")
+dill.dump(lam,file("lambdified_func",'wb'))
+
+
+
+# In[4]:
+
+help(dill.dump)
+
+
+# In[ ]:
+
+
 

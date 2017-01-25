@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[15]:
+# In[ ]:
 
 import glob
 from RadioArray import RadioArray
@@ -157,8 +157,8 @@ def PrepareData(infoFile,dataFolder,timeStart = 0, timeEnd = 0,arrayFile='arrays
 if __name__ == '__main__':
     dataDict = PrepareData(infoFile='SB120-129/WendysBootes.npz',
                            dataFolder='SB120-129/',
-                           timeStart = 0, timeEnd = 0,
-                           arrayFile='arrays/lofar.hba.antenna.cfg',load=True)
+                           timeStart = 1, timeEnd = 50,
+                           arrayFile='arrays/lofar.hba.antenna.cfg',load=False)
     rays = dataDict['rays']
     numDirections = dataDict['numDirections']
     numTimes = dataDict['numTimes']
