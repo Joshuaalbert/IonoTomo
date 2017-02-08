@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[5]:
+# In[1]:
 
 import numpy as np
 from scipy.integrate import odeint
@@ -520,8 +520,9 @@ def SimulatedDataInversion(numThreads = 1,noise=None):
     def ppPrimaryInversionSteps(dtec,rays,TCI,mu,Kmu,rho,Krho,muprior,rhoprior,sigma_ne,L_ne,sigma_rho,numTimes,numDirections,priorFlag=True):
         G, CmGt, ddGdmpm = ParallelInversionProducts.primaryInversionSteps(dtec,rays,TCI,mu,Kmu,rho,Krho,muprior,rhoprior,sigma_ne,L_ne,sigma_rho,numTimes,numDirections,priorFlag=True)
         return G, CmGt, ddGdmpm
-    def ppSecondaryInversionSteps(rays, G, CmGt, TCI, sigma_rho, Cd):
-        return ParallelInversionProducts.secondaryInversionSteps(rays, G, CmGt, TCI, sigma_rho, Cd)
+    def ppSecondaryInversionSteps(rays, G, CmGt, TCI, sigma_rho, Cd,numTimes,numDirections):
+        S = ParallelInversionProducts.secondaryInversionSteps(rays, G, CmGt, TCI, sigma_rho, Cd,numTimes,numDirections)
+        return S
         
     jobs = {}
     job_server = pp.Server(numThreads, ppservers=())
@@ -613,7 +614,7 @@ def SimulatedDataInversion(numThreads = 1,noise=None):
         job_server = pp.Server(numThreads, ppservers=())
         for i in range(numThreads):
             job = job_server.submit(ppSecondaryInversionSteps,
-                       args=(raypack[i], G, CmGt, neTCIModel, sigma_rhobar, Cd),
+                       args=(raypack[i], G, CmGt, TCI, sigma_rho, Cd,numTimes,Ndir),
                        depfuncs=(),
                        modules=('ParallelInversionProducts',))
             jobs['ppSecondaryInversionSteps_{0}'.format(i)] = job
@@ -622,26 +623,38 @@ def SimulatedDataInversion(numThreads = 1,noise=None):
             S_ = jobs['ppSecondaryInversionSteps_{0}'.format(i)]()
             S += S_
         print("S:",S)
+        print("T:",T)
+        import pylab as plt
+        ax = plt.subplot(121)
+        ax.imshow(S)
+        plt.colorbar()
         print("Inverting S")
         T = np.linalg.pinv(S)
-        print("T:",T)
+        ax = plt.subplot(122)
+        ax.imshow(T)
+        plt.colorbar()
+        plt.show()
+        job_server.print_stats()
+        job_server.destroy()
+        return
+    
         # dm = (mp-m) + CmGt.T.ddGdmpm
         ddGdmpmArray = datumDicts2array([ddGdmpm])
         TddGdmpmArray = T.dot(ddGdmpmArray)
-        CmGtArray = np.zeros([np.size(mlog),Nd])
+        CmGtArray = np.zeros([np.size(mu)+np.size(rho),Nd])
         for i in range(Nd):
-            CmGtArray[:,i] = CmGt[i]
-        dmlog = (mlogprior - mlog) + CmGtArray.dot(TddGdmpmArray)
-        drho = (rhoprior - rho) - sigma_rho**2/1e13*np.sum(TddGdmpmArray)
-        residuals = (np.mean(np.abs(dmlog)) / np.mean(np.abs(mlog)) + np.abs(drho/rho))/2.
+            CmGtArray[:np.size(mu),i] = CmGt[i][0]
+            CmGtArray[np.size(mu):,i] = CmGt[i][1]
+        dm = CmGtArray.dot(TddGdmpmArray)
+        dmu = (muPrior - mu) + dm[:np.size(mu)]
+        drho = (rhoPrior - rho) + dm[np.size(mu):]
+        residuals = np.sum(dmu**2) / np.sum(mu**2) + np.sum(drho**2) / np.sum(rho**2)
         print("Residual:",residuals)
-        print("Incrementing mlog and rho")
-        print("dmlog:",dmlog)
+        print("Incrementing mu and rho")
+        print("dmlog:",dmu)
         print("drho:",drho)
-        mlog += dmlog
+        mu += dmu
         rho += drho
-        job_server.print_stats()
-        job_server.destroy()
         iter += 1
     print('Finished inversion with {0} iterations'.format(iter))
     #print(rays)

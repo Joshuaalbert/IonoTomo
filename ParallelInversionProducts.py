@@ -50,111 +50,6 @@ def forwardEquations(rays,TCI,mu,Kmu,rho,Krho,numTimes,numDirections):
         dtec[datumIdx] = ( tec - Krho * np.exp(rho[dirIdx]) * (ray['s'][-1] - ray['s'][0]) ) / 1e13
     return dtec,rho,Krho
 
-def primaryInversionStepsSerial(dtec,rays,TCI,mu,Kmu,rho,Krho,muprior,rhoprior,sigma_ne,L_ne,sigma_rho,priorFlag=True):
-    '''Performs forward integration of kernel, as well as derivative kernels. Time scales linearly with number of antennas.
-    ``dtec`` - dict, datumIdx: dtec
-    ``rays`` - dict, datumIdx: x,y,z,s arrays
-    ``TCI`` - TriCubic object
-    ``mu`` - current log(ne/K_mu) model
-    ``Kmu`` - K_mu
-    ``rho`` - current baseline log(tec0/K_rho/S)
-    ``Krho`` - K_rho
-    ``muprior`` - a priori log(ne/K_mu)
-    ``rhoprior`` - a priori baseline log(tec0/K_rho/S)
-    ``sigma_ne`` - expected deviation from mlogprior that mlog_true will be
-    ``L_ne`` - coherence scale of ne in km
-    ``sigma_rho - expected deviate from rhoprior that rho_true will be
-    ``priorFlag`` - Wether or not to computer the G.(mp - m) term (not if m=mp)'''
-    import numpy as np
-    from scipy.integrate import simps
-    print("Serial primary thread")
-    #forward equation
-    print('Forward equation...')
-    TCI.m = mu
-    TCI.clearCache()
-    dtecModel = {}
-    keys = rays.keys()
-    for datumIdx in rays.keys():
-        ray = rays[datumIdx]
-        Ns = len(ray['s'])
-        neint = np.zeros(Ns)
-        i = 0
-        while i < Ns:
-            x,y,z = ray['x'][i],ray['y'][i],ray['z'][i]
-            ne = TCI.interp(x,y,z)
-            neint[i] += ne
-            i += 1
-        tec = simps(neint,ray['s'])
-        if tec0 is None:
-            tec0 = tec
-        dtecModel[datumIdx] = (tec - tec0)/1e13
-    #calculate data residuals dd = d - g
-    print('dd = d - g')
-    dd = {}
-    for datumIdx in keys:
-        dd[datumIdx] = dtec[datumIdx] - dtecModel[datumIdx]
-    #calculate G^i = (K*exp(mu)*delta(R^i), 1)
-    print('G kernels')
-    G = {}
-    for datumIdx in keys:
-        ray = rays[datumIdx]
-        Ns = len(ray['s'])
-        Gi = np.zeros(Ns)
-        i = 0
-        while i < Ns:
-            x,y,z = ray['x'][i],ray['y'][i],ray['z'][i]
-            ne = TCI.interp(x,y,z)#K*exp(mu)*delta(R^i)
-            Gi[i] += ne
-            i += 1
-        G[datumIdx] = Gi
-    if priorFlag:
-        ##calculate G.(mp - m)
-        print("G.(mp - m)")
-        TCI.m = mlogprior - mlog
-        TCI.clearCache()
-        Gdmpm = {}
-        for datumIdx in keys:
-            ray = rays[datumIdx]
-            Ns = len(ray['s'])
-            mpm = np.zeros(Ns)
-            i = 0
-            while i < Ns:
-                x,y,z = ray['x'][i],ray['y'][i],ray['z'][i]
-                mpm[i] += TCI.interp(x,y,z)#K*exp(mu)*delta(R^i)
-                i += 1
-            Gdmpm[datumIdx] = simps(G[datumIdx]*mpm,ray['s'])
-            #G_rho(rho_p - rho) term
-            Gdmpm[datumIdx] += (rhoprior - rho)
-        ##calculate the difference dd - Gdmpm
-        print('dd - D.(mp - m)')
-        ddGdmpm = {}
-        for datumIdx in keys:
-            ddGdmpm[datumIdx] = dd[datumIdx] - Gdmpm[datumIdx]
-    else:
-        ddGdmpm = {}
-        for datumIdx in keys:
-            ddGdmpm[datumIdx] = dd[datumIdx]
-        
-    #calculate int_R^i Cm(x,x').G^i(x')
-    print('int_R^i Cm(x,y).G^i(y)')
-    xmod,ymod,zmod = TCI.getModelCoordinates()
-    CmGt = {}#each ray gives a column vector of int_R^i Cm(x,x').G^i(x') evaluated at all x of model
-    for datumIdx in keys:
-        #print(datumIdx)
-        ray = rays[datumIdx]
-        
-        Ns = len(ray['s'])
-
-        A = np.zeros([np.size(xmod),Ns])
-        i = 0
-        while i < Ns:
-            x,y,z = ray['x'][i],ray['y'][i],ray['z'][i]
-            diff = np.sqrt((xmod - x)**2 + (ymod - y)**2 + (zmod - z)**2)
-            A[:,i] = np.log(1. + (sigma_ne/K)**2 * np.exp(-diff/L_ne))
-            i += 1
-        B = A*G[datumIdx]#should broadcast properly last indcies the same
-        CmGt[datumIdx] = simps(B,ray['s'],axis=1)# + sigma_rho**2
-    return G, CmGt, ddGdmpm
 
 def primaryInversionSteps(dtec,rays,TCI,mu,Kmu,rho,Krho,muprior,rhoprior,sigma_ne,L_ne,sigma_rho,numTimes,numDirections,priorFlag=True):
     '''Performs forward integration of kernel, as well as derivative kernels. Time scales linearly with number of antennas.
@@ -189,7 +84,7 @@ def primaryInversionSteps(dtec,rays,TCI,mu,Kmu,rho,Krho,muprior,rhoprior,sigma_n
     dd = {}
     G = {} #datumIdx: (Gmu,Grho)
     xmod,ymod,zmod = TCI.getModelCoordinates()
-    CmuGmut = {}#each ray gives a column vector of int_R^i Cm(x,x').G^i(x') evaluated at all x of model
+    CmGt = {}#each ray gives a column vector of int_R^i Cmu(x,x').Gmu^i(x'), Crho.Grho evaluated at all x of model
     keys = rays.keys()
     for datumIdx in keys:
         antIdx, dirIdx, timeIdx = reverseDatumIdx(datumIdx,numTimes,numDirections)
@@ -206,7 +101,8 @@ def primaryInversionSteps(dtec,rays,TCI,mu,Kmu,rho,Krho,muprior,rhoprior,sigma_n
             Cmu[:,i] = np.log(1. + (sigma_ne/Kmu)**2 * np.exp(-diff/L_ne))
             i += 1
         Gmu = Kmu*np.exp(Gmu)/1e13#same as ne
-        Grho = -Krho*np.exp(rho[dirIdx])/1e13
+        Grho = np.zeros(numDirections)
+        Grho[dirIdx] = -Krho*np.exp(rho[dirIdx])/1e13
         #tec = simps(Gi,ray['s'])
         #dtecModel[datumIdx] = (tec - tec0)/1e13
         #dd[datumIdx] = dtec[datumIdx] - dtecModel[datumIdx]
@@ -214,17 +110,16 @@ def primaryInversionSteps(dtec,rays,TCI,mu,Kmu,rho,Krho,muprior,rhoprior,sigma_n
         #B = A*G[datumIdx]#should broadcast properly last indcies the same
         
         #CmGt[datumIdx] = simps(B,ray['s'],axis=1) + sigma_rho**2
-        D = simps(np.vstack((Gmu + Grho,Cmu*Gmu)),ray['s'],axis=1)
+        D = simps(np.vstack((Gmu + Grho[dirIdx],Cmu*Gmu)),ray['s'],axis=1)
         G[datumIdx] = [Gmu,Grho]
         dtecModel[datumIdx] = D[0]
         dd[datumIdx] = dtec[datumIdx] - dtecModel[datumIdx]
-        CmuGmut[datumIdx] = D[1:]# + sigma_rho**2
+        CmGt[datumIdx] = [D[1:],sigma_rho**2 * Grho * (ray['s'][-1] - ray['s'][0])]#
         #batch all simps together
         
               
     if priorFlag:
         ##calculate G.(mp - m)
-        #print("G.(mp - m)")
         TCI.m = muprior - mu
         drhopriorrho = rhoprior - rho
         TCI.clearCache()
@@ -233,13 +128,13 @@ def primaryInversionSteps(dtec,rays,TCI,mu,Kmu,rho,Krho,muprior,rhoprior,sigma_n
             antIdx, dirIdx, timeIdx = reverseDatumIdx(datumIdx,numTimes,numDirections)
             ray = rays[datumIdx]
             Ns = len(ray['s'])
-            mpm = np.zeros(Ns)
+            mupmu = np.zeros(Ns)
             i = 0
             while i < Ns:
                 x,y,z = ray['x'][i],ray['y'][i],ray['z'][i]
-                mpm[i] += TCI.interp(x,y,z)#K*exp(mu)*delta(R^i)
+                mupmu[i] += TCI.interp(x,y,z)#K*exp(mu)*delta(R^i)
                 i += 1
-            Gdmpm[datumIdx] = simps(G[datumIdx][0]*mpm + G[datumIdx][1]*drhopriorrho[dirIdx],ray['s'])
+            Gdmpm[datumIdx] = simps(G[datumIdx][0]*mupmu + G[datumIdx][1][dirIdx]*drhopriorrho[dirIdx],ray['s'])
         ##calculate the difference dd - Gdmpm
         #print('dd - D.(mp - m)')
         ddGdmpm = {}
@@ -250,39 +145,9 @@ def primaryInversionSteps(dtec,rays,TCI,mu,Kmu,rho,Krho,muprior,rhoprior,sigma_n
         for datumIdx in keys:
             ddGdmpm[datumIdx] = dd[datumIdx]
         
-    return G, CmuGt, ddGdmpm
-    
-def secondaryInversionStepsTCIInside(rays, G, CmGt, TCI, sigma_rho, Cd):
-    '''Compute S = Cd + G.Cm.G^t using parameters:
-    ``rays`` - the dict {datumIdx:x,y,z,s arrays}
-    ``G`` - the derivative along rays, a map {datumIdx: array of G^i(x) along ray^i} (product of primary inversion steps)
-    ``CmGt`` - a map of int R^j Cm(x,x') G^j(x') evaluated at all model points (product of primary inversion steps)
-    ``TCI`` - a tricubic interpolator
-    ``sigma_rho`` - the deviation of rho (TEC baseline) because Cm only contains C_mu'''
-    #G.Cm.G^t = int R^i G^i(x) int R^j Cmu(x,x') G^j(x') + sigma_rho**2
-        
-    Nr = len(G)
-    S = np.zeros([Nr,Nr],dtype=np.double)
-    for datumIdxi in rays:
-        ray = rays[datumIdxi]
-        Ns = len(ray['s'])
-        GCmGt = np.zeros(Ns)#will be overwritten many times
-        datumIdxj = datumIdxi
-        while datumIdxj < Nr:#contain swapping this out to first loop (TCI operations are slowest I think)
-            TCI.m = CmGt[datumIdxj]
-            TCI.clearCache()
-            i = 0
-            while i < Ns:
-                x,y,z = ray['x'][i],ray['y'][i],ray['z'][i]
-                GCmGt[i] += G[datumIdxi][i] * TCI.interp(x,y,z)
-                i += 1
-            S[datumIdxi,datumIdxj] += simps(GCmGt,ray['s']) + sigma_rho**2 + Cd[datumIdxi,datumIdxj]
-            if datumIdxi != datumIdxj:
-                S[datumIdxj,datumIdxi] = S[datumIdxi,datumIdxj]
-            datumIdxj += 1
-    return S
+    return G, CmGt, ddGdmpm
 
-def secondaryInversionSteps(rays, G, CmGt, TCI, sigma_rho, Cd):
+def secondaryInversionSteps(rays, G, CmGt, TCI, sigma_rho, Cd,numTimes,numDirections):
     '''Compute S = Cd + G.Cm.G^t using parameters:
     ``rays`` - the dict {datumIdx:x,y,z,s arrays}
     ``G`` - the derivative along rays, a map {datumIdx: array of G^i(x) along ray^i} (product of primary inversion steps)
@@ -298,19 +163,24 @@ def secondaryInversionSteps(rays, G, CmGt, TCI, sigma_rho, Cd):
     S = np.zeros([Nr,Nr],dtype=np.double)
     datumIdxj = 0
     while datumIdxj < Nr:#contain swapping this out to first loop (TCI operations are slowest I think)
-        TCI.m = CmGt[datumIdxj]
+        antIdxj, dirIdxj, timeIdxj = reverseDatumIdx(datumIdxj,numTimes,numDirections)
+        TCI.m = CmGt[datumIdxj][0] #interpolate already done int_R^i Cmu(x,x').Gmu(x')
         TCI.clearCache()
         for datumIdxi in rays:
-            if datumIdxj >= datumIdxi:
+            if datumIdxj >= datumIdxi:#only do j>=i indicies, swap after
+                antIdxi, dirIdxi, timeIdxi = reverseDatumIdx(datumIdxi,numTimes,numDirections)
                 ray = rays[datumIdxi]
                 #Ns = len(ray['s'])
                 #GCmGt = np.zeros(Ns)#will be overwritten many times
                 i = 0
                 while i < Ns:
                     x,y,z = ray['x'][i],ray['y'][i],ray['z'][i]
-                    GCmGt[i] += G[datumIdxi][i] * TCI.interp(x,y,z)
+                    if dirIdxi == dirIdxj:#correlation between rho directions
+                        GCmGt[i] += G[datumIdxi][0][i] * TCI.interp(x,y,z) + G[datumIdxi][1][dirIdxi] * CmGt[datumIdxj][1][dirIdxj]
+                    else:
+                        GCmGt[i] += G[datumIdxi][0][i] * TCI.interp(x,y,z)
                     i += 1
-                S[datumIdxi,datumIdxj] += simps(GCmGt,ray['s']) + sigma_rho**2/1e26 + Cd[datumIdxi,datumIdxj]
+                S[datumIdxi,datumIdxj] += simps(GCmGt,ray['s']) + Cd[datumIdxi,datumIdxj]
                 if datumIdxi != datumIdxj:
                     S[datumIdxj,datumIdxi] = S[datumIdxi,datumIdxj]
         datumIdxj += 1
