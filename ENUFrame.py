@@ -88,8 +88,8 @@ def itrs_to_enu(itrs_coo, enu_frame):
     ITRS usually has units attached but ENU does not require units 
     if it specifies a direction.'''
     
-    if np.any(itrs_coo.obstime != enu_frame.obstime):
-        itrs_coo = itrs_coo.transform_to(ITRS(obstime=enu_frame.obstime))
+    #if np.any(itrs_coo.obstime != enu_frame.obstime):
+    #    itrs_coo = itrs_coo.transform_to(ITRS(obstime=enu_frame.obstime))
         
     # if the data are UnitSphericalRepresentation, we can skip the distance calculations
     is_unitspherical = (isinstance(itrs_coo.data, UnitSphericalRepresentation) or

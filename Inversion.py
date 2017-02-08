@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[1]:
+# In[ ]:
 
 from Geometry import *
 import numpy as np
@@ -13,9 +13,111 @@ from PlotOctTree import mayaviPlot,plotOctTree
 import astropy.units as au
 import astropy.time as at
 import astropy.coordinates as ac
-from ENUFrame import ENU
+#from ENUFrame import ENU
 
-import FermatPrinciple as fp
+#import FermatPrincipleCartesian as fp
+def mayaviPlot2(x,m,mBackground=None,maxNumPts=None):
+    '''Do a density plot'''
+
+    from mayavi.sources.api import VTKDataSource
+    from mayavi import mlab
+
+    from scipy.interpolate import griddata
+
+    xmin,ymin,zmin = np.min(x[:,0]),np.min(x[:,1]),np.min(x[:,2])
+    xmax,ymax,zmax = np.max(x[:,0]),np.max(x[:,1]),np.max(x[:,2])
+    X,Y,Z = np.mgrid[xmin:xmax:128j,ymin:ymax:128j,zmin:zmax:128j]
+    
+    if mBackground is not None:
+        data  = m - mBackground
+    else:
+         data = m
+    #data -= np.min(data)
+    #data /= np.max(data)
+    
+    field = griddata((x[:,0],x[:,1],x[:,2]),data,(X.flatten(),Y.flatten(),Z.flatten()),method='linear').reshape(X.shape)
+    
+    mlab.points3d(x[:,0],x[:,1],x[:,2],data,scale_mode='vector', scale_factor=10.)
+    mlab.contour3d(X,Y,Z,field,contours=5,opacity=0.2)
+    
+    vmin = np.min(data)
+    vmax = np.max(data)
+    #l = mlab.pipeline.volume(mlab.pipeline.scalar_field(X,Y,Z,field),vmin=vmin, vmax=vmin + .5*(vmax-vmin))
+    #l._volume_property.scalar_opacity_unit_distance = min((xmax-xmin)/4.,(ymax-ymin)/4.,(zmax-zmin)/4.)
+    #l._volume_property.shade = False
+    mlab.colorbar()
+    
+    mlab.axes()
+    mlab.show()
+def plotWavefront(neTCI,rays,save=False,animate=False):
+    xmin = neTCI.xvec[0]
+    xmax = neTCI.xvec[-1]
+    ymin = neTCI.yvec[0]
+    ymax = neTCI.yvec[-1]
+    zmin = neTCI.zvec[0]
+    zmax = neTCI.zvec[-1]
+    
+    X,Y,Z = np.mgrid[xmin:xmax:len(neTCI.xvec)*1j,
+                     ymin:ymax:len(neTCI.yvec)*1j,
+                     zmin:zmax:len(neTCI.zvec)*1j]
+    
+    #reshape array
+    data = neTCI.getShapedArray()
+    print(np.mean(data),np.max(data),np.min(data))
+    l = mlab.pipeline.volume(mlab.pipeline.scalar_field(X,Y,Z,data))#,vmin=min, vmax=min + .5*(max-min))
+    l._volume_property.scalar_opacity_unit_distance = min((xmax-xmin)/4.,(ymax-ymin)/4.,(zmax-zmin)/4.)
+    l._volume_property.shade = False
+    mlab.contour3d(X,Y,Z,data,contours=5,opacity=0.2)
+    mlab.colorbar()
+    
+    def getWave(rays,idx):
+        xs = np.zeros(len(rays))
+        ys = np.zeros(len(rays))
+        zs = np.zeros(len(rays))
+        ridx = 0
+        while ridx < len(rays):
+            xs[ridx] = rays[ridx]['x'][idx]
+            ys[ridx] = rays[ridx]['y'][idx]
+            zs[ridx] = rays[ridx]['z'][idx]
+            ridx += 1
+        return xs,ys,zs
+    
+    if rays is not None:
+        for ray in rays:
+            mlab.plot3d(ray["x"],ray["y"],ray["z"],tube_radius=1.5)
+        if animate:
+            plt = mlab.points3d(*getWave(rays,0),color=(1,0,0),scale_mode='vector', scale_factor=10.)
+            #mlab.move(-200,0,0)
+            view = mlab.view()
+            @mlab.animate(delay=100)
+            def anim():
+                nt = len(rays[0]["s"])
+                f = mlab.gcf()
+                save = False
+                while True:
+                    i = 0
+                    while i < nt:
+                        #print("updating scene")
+                        xs,ys,zs = getWave(rays,i)
+                        plt.mlab_source.set(x=xs,y=ys,z=zs)
+                        #mlab.view(*view)
+                        if save:
+                            #mlab.view(*view)
+                            mlab.savefig('figs/wavefronts/wavefront_{0:04d}.png'.format(i))#,magnification = 2)#size=(1920,1080))
+                        #f.scene.render()
+                        i += 1
+                        yield
+                    save = False
+            anim()
+    mlab.show()
+    if save and rays is not None:
+        return
+        import os
+        os.system('ffmpeg -r 10 -f image2 -s 1900x1080 -i figs/wavefronts/wavefront_%04d.png -vcodec libx264 -crf 25  -pix_fmt yuv420p figs/wavefronts/wavefront.mp4')
+
+def plotModel(neTCI,save=False):
+    '''Plot the model contained in a tricubic interpolator (a convienient container for one)'''
+    plotWavefront(neTCI,None,save=save)
     
 def generateModelFromOctree(octTree,numRays):
     '''Generate model '''
@@ -175,8 +277,9 @@ def ionosphereModel(x,dayTime=True,bump=False):
         Ne = 0.3*4*np.exp((h-85.)/50.)/(1 + np.exp((h-85.)/50.))**2
         res += Ne
     if bump:
-        res += 0.5*np.exp(-np.sum((x - np.array([30,30,600]))**2)/50.**2)
-        res += 0.2*np.exp(-np.sum((x - np.array([-30,-30,200]))**2)/50.**2)
+        res += 0.5*np.exp(-np.sum((x - np.array([30,30,600]))**2)/30.**2)
+        res += 0.2*np.exp(-np.sum((x - np.array([-30,-30,200]))**2)/30.**2)
+        res += 0.2*np.exp(-np.sum((x - np.array([-40,-40,600]))**2)/30.**2)
     return res
 
 def repartitionOctTree(octTree,rays, maxNum=3,minScale = 5.):
@@ -358,36 +461,7 @@ def transformCov2Linear(Cm_log,K):
     '''
     return (np.exp(Cm_log) - 1.)*K**2
 
-def mayaviPlot2(x,m,mBackground=None,maxNumPts=None):
-    '''Do a density plot'''
 
-    from mayavi.sources.api import VTKDataSource
-    from mayavi import mlab
-
-    from scipy.interpolate import griddata
-
-    xmin,ymin,zmin = np.min(x[:,0]),np.min(x[:,1]),np.min(x[:,2])
-    xmax,ymax,zmax = np.max(x[:,0]),np.max(x[:,1]),np.max(x[:,2])
-    X,Y,Z = np.mgrid[xmin:xmax:128j,ymin:ymax:128j,zmin:zmax:128j]
-    
-    if mBackground is not None:
-        data  = m - mBackground
-    else:
-         data = m
-    field = griddata((x[:,0],x[:,1],x[:,2]),data,(X.flatten(),Y.flatten(),Z.flatten()),method='linear').reshape(X.shape)
-    
-    mlab.points3d(x[:,0],x[:,1],x[:,2],data,scale_mode='vector', scale_factor=10.)
-    mlab.contour3d(X,Y,Z,field,contours=3,opacity=0.2)
-    
-    min = np.min(data)
-    max = np.max(data)
-    l = mlab.pipeline.volume(mlab.pipeline.scalar_field(X,Y,Z,field),vmin=min, vmax=min + .5*(max-min))
-    l._volume_property.scalar_opacity_unit_distance = (xmax-xmin)/2.
-    l._volume_property.shade = False
-    mlab.colorbar()
-    
-    mlab.axes()
-    mlab.show()
 
 
 def LinearSolution(dobs,G,Cd,Cmprior,mprior):
@@ -645,7 +719,7 @@ def LMSol(G,mprior,Cd,Cm,dobs,mu=1.,octTree=None):
         C[C==0] = np.min(C[C>0])/2.
     else:
         C = np.sum(G>0,axis=0)
-        plt.hist(C)
+        plt.hist(C,bins=40)
         plt.show()
         C = C/float(np.max(C))
         C[C==0] = np.min(C[C>0])/2.
@@ -653,7 +727,7 @@ def LMSol(G,mprior,Cd,Cm,dobs,mu=1.,octTree=None):
         #C = C/np.max(C)
     res = 1
     iter = 0
-    while res > 1e-6 and iter < 10000:
+    while res > 1e-8 and iter < 10000:
         #forward transform
         #print(mlog)
         mForward = K*np.exp(mlog)
@@ -686,71 +760,6 @@ def LMSol(G,mprior,Cd,Cm,dobs,mu=1.,octTree=None):
     #print(transformCov2Linear(CmlogPost,K) - cmlin)
     return K*np.exp(mlog), cmlin
 
-class InversionCoordSys(object):
-
-    '''Handles the frame and cartesian coordiantes for an inversion.
-    Allows time varying, as well as fixed.'''
-    def __init__(self,radioArray):     
-        self.radioArray = radioArray
-        self.phaseTracking = False
-        self.fixedFrame = False
-        self.altaz = None
-        
-    def setPhaseTracking(self,ra,dec):
-        """ra and dec in deg, sets the ra and dec that defines the center of the tangent plane of sky"""
-        self.phaseTrack = ac.SkyCoord(ra=ra*au.deg,dec =dec*au.deg,frame='icrs')
-        self.phaseTracking = True
-        seld.fixedFrame = False
-    def setFixedFrame(self,xyz):
-        self.fixedFrameDir = xyz
-        self.phaseTracking = False
-        self.fixedFrame = True
-    def getDirection(self,ra,dec,time):
-        '''define a frame at time and radioArray center, and return
-        the direction ENU coords'''
-        frame = ac.AltAz(location = self.radioArray.getCenter(), obstime = time, pressure=None)
-        rd = ac.SkyCoord(ra=ra*au.deg,dec = dec*au.deg, frame='icrs')
-        altaz = rd.transform_to(frame)
-        self.altaz = altaz
-        alt = altaz.alt.rad
-        az = altaz.az.rad
-        #phase tracking points straight up
-        z = np.sin(alt)
-        x = np.cos(alt)*np.sin(az)
-        y = np.cos(alt)*np.cos(az)
-        return np.array([x,y,z])
-    def getAxes(self):
-        if self.fixedFrame:
-            rotDirection = self.fixedFrameDir
-        if self.phaseTracking:
-            rotDirection = self.getDirection(self.phaseTrack.ra.deg,self.phaseTrack.dec.deg,time)
-        #rotate ENU to rotDirection
-        axis = np.cross(np.array([0,0,1]),rotDirection)
-        angle = np.arccos(rotDirection.dot(np.array([0,0,1])))
-        R = rot(axis,angle)
-        x = R.dot(np.array([1,0,0]))
-        y = R.dot(np.array([0,1,0]))
-        z = R.dot(np.array([0,0,1]))
-        return x,y,z
-    def getComponents(self,ra,dec,time):
-        '''Get the cartesian components defined by frame.
-        time is astropy time or isot string'''
-        if type(time) == type(""):
-            try:
-                time = at.Time(time,format='isot',scale='tai')
-            except:
-                print("{0} is not in isot format".format(time))
-                return
-        xyz = self.getDirection(ra,dec,time)
-        if self.fixedFrame:
-            rotDirection = self.fixedFrameDir
-        if self.phaseTracking:
-            rotDirection = self.getDirection(self.phaseTrack.ra.deg,self.phaseTrack.dec.deg,time)
-        #rotate ENU to rotDirection
-        axis = np.cross(np.array([0,0,1]),rotDirection)
-        angle = np.arccos(rotDirection.dot(np.array([0,0,1])))
-        R = rot(axis,angle)
-        return R.dot(xyz)
 
 def invertTEC(infoFile,dataFolder,timeStart = 0, timeEnd = 0,arrayFile='arrays/lofar.hba.antenna.cfg',load=False):
     '''Invert the 3d tec from data.
@@ -952,6 +961,7 @@ def invertTEC(infoFile,dataFolder,timeStart = 0, timeEnd = 0,arrayFile='arrays/l
     R = np.eye(CmCm.shape[0]) - CmCm
     print("Resolved by dataSet:{0}, resolved by a priori:{1}".format(np.trace(R),np.trace(CmCm)))
     
+    
 if __name__=='__main__':
     
     np.random.seed(1234)
@@ -965,7 +975,7 @@ if __name__=='__main__':
         maxBaseline = 150.
         height=1000.
         
-        rays = makeRaysFromSourceAndReciever(maxBaseline = maxBaseline,height=height)
+        rays = makeRaysFromSourceAndReciever(maxBaseline = maxBaseline,height=height,numSources=15,numRecievers=30)
         octTree = constructIonosphereModel(maxBaseline=maxBaseline,height=height,rays = rays)
         cleanRays(octTree)
         print("Propagating {0} rays".format(len(rays)))
@@ -1000,10 +1010,11 @@ if __name__=='__main__':
         #m,Cm = SteepestDescent(octTree,rays,dobs,Cd,Cmprior,mprior)
         m,Cm = LMSol(G,mprior,Cd,Cmprior,dobs,mu=1.0,octTree=None)
         #smoothify and plot
-        s = fp.SmoothVoxel(octTree)
-        model = s.smoothifyOctTree()
-        fp.plotCube(model ,-octTree.dx/2.,octTree.dx/2.,-octTree.dy/2.,octTree.dy/2.,0.,1000.,N=128,dx=None,dy=None,dz=None)
-        mayaviPlot2(x,m,mBackground=mprior)
+        #s = fp.SmoothVoxel(octTree)
+        #model = s.smoothifyOctTree()
+        #fp.plotCube(model ,-octTree.dx/2.,octTree.dx/2.,-octTree.dy/2.,octTree.dy/2.,0.,1000.,N=128,dx=None,dy=None,dz=None)
+        mayaviPlot2(x,m,mBackground=None)
+        mayaviPlot2(x,mexact,mBackground=None)
         CmCm = Cm.dot(np.linalg.inv(Cmprior))
         R = np.eye(CmCm.shape[0]) - CmCm
         print("Resolved by dataSet:{0}, resolved by a priori:{1}".format(np.trace(R),np.trace(CmCm)))

@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[ ]:
+# In[5]:
 
 import numpy as np
 from scipy.integrate import odeint
@@ -26,12 +26,17 @@ import astropy.time as at
 from time import time as tictoc
 from TricubicInterpolation import TriCubic
 
+import math
+import pp
+
+from RadioArray import RadioArray
+
 class Fermat(object):
     def __init__(self,neTCI=None,frequency = 120e6,type='s'):
         self.type = type
         self.frequency = frequency#Hz
         if neTCI is not None:
-            self.ne2n(neTCI)          
+            self.ne2n(neTCI)  
             return
         
     def loadFunc(self,file):
@@ -82,11 +87,19 @@ class Fermat(object):
         '''return pxdot,pydot,pzdot,xdot,ydot,zdot,sdot'''
         #print(y)
         px,py,pz,x,y,z,s = y
-        n,nx,ny,nz = self.nTCI.interp3(x,y,z)
+        #n,nx,ny,nz,nxy,nxz,nyz,nxyz = self.nTCI.interp(x,y,z,doDiff=True)
+        #ne,nex,ney,nez,nexy,nexz,neyz,nexyz = self.neTCI.interp(x,y,z,doDiff=True)
+        #A = - 8.98**2/self.frequency**2
+        #n = math.sqrt(1. + A*ne)
+        #ndot = A/(2.*n)
+        #nx = ndot * nex
+        #ny = ndot * ney
+        #nz = ndot * nez
+        
         #print(n)
-        #n,nx,ny,nz = 1.,0,0,0
-        if (n>1):
-            print(x,y,z,n)
+        n,nx,ny,nz = 1.,0,0,0
+        #if (n>1):
+        #    print(x,y,z,n)
         if self.type == 'z':
             sdot = n / pz
             pxdot = nx*n/pz
@@ -112,11 +125,27 @@ class Fermat(object):
     def jacODE(self,y,t,*args):
         '''return d ydot / d y, with derivatives down column for speed'''
         px,py,pz,x,y,z,s = y
-        #n,nx,ny,nz,nxy,nxz,nyz = self.nTCI.interp3(x,y,z,doDouble=True)
+        #n,nx,ny,nz,nxy,nxz,nyz,nxyz = self.nTCI.interp(x,y,z,doDiff=True)
         nxx,nyy,nzz = 0.,0.,0.
-        #n,nx,ny,nz,nxy,nxz,nyz = 1.,0,0,0,0,0,0
-        if (n>1):
-            print(x,y,z,n)
+        n,nx,ny,nz,nxy,nxz,nyz = 1.,0,0,0,0,0,0
+        
+        #ne,nex,ney,nez,nexy,nexz,neyz,nexyz = self.neTCI.interp(x,y,z,doDiff=True)
+        #A = - 8.98**2/self.frequency**2
+        #n = math.sqrt(1. + A*ne)
+        #ndot = A/(2.*n)
+        #nx = ndot * nex
+        #ny = ndot * ney
+        #nz = ndot * nez
+        
+        #ndotdot = -(A * ndot)/(2. * n**2)
+        
+        #nxy = ndotdot * nex*ney + ndot * nexy
+        #nxz = ndotdot * nex * nez + ndot * nexz
+        #nyz = ndotdot * ney * nez + ndot * neyz
+        
+        #if (n>1):
+        #    print(x,y,z,n)
+            
         if self.type == 'z':
             x0 = n
             x1 = nx
@@ -184,18 +213,7 @@ class Fermat(object):
         s = Y[:,6]
         return x,y,z,s   
 
-def generateKernel(gFile,forwardKernelParamDict):
-    data = np.load(gFile)
-    #print data
-    Gk = data['Gk'].item(0)
-    Jk = data['Jk']
-    G = Gk.subs(forwardKernelParamDict)
-    J = []
-    for j in Jk:
-        J.append(j.subs(forwardKernelParamDict))
-    return {'G':G,'J':J}
-
-def plotWavefront(neTCI,rays,save=False):
+def plotWavefront(neTCI,rays,save=False,animate=False):
     xmin = neTCI.xvec[0]
     xmax = neTCI.xvec[-1]
     ymin = neTCI.yvec[0]
@@ -208,11 +226,12 @@ def plotWavefront(neTCI,rays,save=False):
                      zmin:zmax:len(neTCI.zvec)*1j]
     
     #reshape array
-    data = neTCI.m.reshape([len(neTCI.xvec),len(neTCI.yvec),len(neTCI.zvec)])
+    data = neTCI.getShapedArray()
+    print(np.mean(data),np.max(data),np.min(data))
     l = mlab.pipeline.volume(mlab.pipeline.scalar_field(X,Y,Z,data))#,vmin=min, vmax=min + .5*(max-min))
     l._volume_property.scalar_opacity_unit_distance = min((xmax-xmin)/4.,(ymax-ymin)/4.,(zmax-zmin)/4.)
     l._volume_property.shade = False
-    #mlab.contour3d(X,Y,Z,data,contours=5,opacity=0.2)
+    mlab.contour3d(X,Y,Z,data,contours=5,opacity=0.2)
     mlab.colorbar()
     
     def getWave(rays,idx):
@@ -230,31 +249,32 @@ def plotWavefront(neTCI,rays,save=False):
     if rays is not None:
         for ray in rays:
             mlab.plot3d(ray["x"],ray["y"],ray["z"],tube_radius=1.5)
-        plt = mlab.points3d(*getWave(rays,0),color=(1,0,0),scale_mode='vector', scale_factor=10.)
-        #mlab.move(-200,0,0)
-        view = mlab.view()
-        @mlab.animate(delay=100)
-        def anim():
-            nt = len(rays[0]["s"])
-            f = mlab.gcf()
-            save = False
-            while True:
-                i = 0
-                while i < nt:
-                    #print("updating scene")
-                    xs,ys,zs = getWave(rays,i)
-                    plt.mlab_source.set(x=xs,y=ys,z=zs)
-                    #mlab.view(*view)
-                    if save:
-                        #mlab.view(*view)
-                        mlab.savefig('figs/wavefronts/wavefront_{0:04d}.png'.format(i))#,magnification = 2)#size=(1920,1080))
-                    #f.scene.render()
-                    i += 1
-                    yield
+        if animate:
+            plt = mlab.points3d(*getWave(rays,0),color=(1,0,0),scale_mode='vector', scale_factor=10.)
+            #mlab.move(-200,0,0)
+            view = mlab.view()
+            @mlab.animate(delay=100)
+            def anim():
+                nt = len(rays[0]["s"])
+                f = mlab.gcf()
                 save = False
-        anim()
+                while True:
+                    i = 0
+                    while i < nt:
+                        #print("updating scene")
+                        xs,ys,zs = getWave(rays,i)
+                        plt.mlab_source.set(x=xs,y=ys,z=zs)
+                        #mlab.view(*view)
+                        if save:
+                            #mlab.view(*view)
+                            mlab.savefig('figs/wavefronts/wavefront_{0:04d}.png'.format(i))#,magnification = 2)#size=(1920,1080))
+                        #f.scene.render()
+                        i += 1
+                        yield
+                    save = False
+            anim()
     mlab.show()
-    if save:
+    if save and rays is not None:
         return
         import os
         os.system('ffmpeg -r 10 -f image2 -s 1900x1080 -i figs/wavefronts/wavefront_%04d.png -vcodec libx264 -crf 25  -pix_fmt yuv420p figs/wavefronts/wavefront.mp4')
@@ -263,15 +283,27 @@ def plotModel(neTCI,save=False):
     '''Plot the model contained in a tricubic interpolator (a convienient container for one)'''
     plotWavefront(neTCI,None,save=save)
     
-def createPrioriModel(iri = None):
+def createPrioriModel(iri = None,L_ne=15.):
     if iri is None:
         iri = IriModel()
-    eastVec = np.linspace(-200,200,40)
-    northVec = np.linspace(-200,200,40)
-    upVec = np.linspace(-10,3000,100)
+    xmin = -200.
+    xmax = 200.
+    ymin = -200.
+    ymax = 200.
+    zmin = -10.
+    zmax = 3000.
+    
+    eastVec = np.linspace(xmin,xmax,int(np.ceil((xmax-xmin)/L_ne)))
+    northVec = np.linspace(ymin,ymax,int(np.ceil((ymax-ymin)/L_ne)))
+    upVec = np.linspace(zmin,zmax,int(np.ceil((zmax-zmin)/L_ne)))
+
     E,N,U = np.meshgrid(eastVec,northVec,upVec,indexing='ij')
     #get the points in ITRS frame
-    #points = ac.SkyCoord(E.flatten()*au.km,N.flatten()*au.km,U.flatten()*au.km,frame=iri.enu).transform_to('itrs').cartesian.xyz.to(au.km).value
+    points = ac.SkyCoord(E.flatten()*au.km,N.flatten()*au.km,U.flatten()*au.km,frame=iri.enu).transform_to('itrs').cartesian.xyz.to(au.km).value
+    X = points[0,:].reshape(E.shape)
+    Y = points[1,:].reshape(N.shape)
+    Z = points[2,:].reshape(U.shape)
+    #X,Y,Z = np.meshgrid(points[0,:],points[1,:],points[2,:],indexing='ij')
     
     ##generate cartesian grid in ITRS frame
     #Nx = int(np.ceil((np.max(points[0,:]) - np.min(points[0,:]))/30.))
@@ -287,43 +319,405 @@ def createPrioriModel(iri = None):
     #                 np.min(points[2,:]):np.max(points[2,:]):1j*Nz]
     #X,Y,Z = np.meshgrid(xvec,yvec,zvec,indexing='ij')
     #Get values at points
-    ne = iri.evaluate(E,N,U)
+    ne = iri.evaluate(X,Y,Z)
     print("created an a priori cube of shape: {0}".format(ne.shape))
     return eastVec,northVec,upVec,ne
 
+def perturbModel(eastVec,northVec,upVec,ne,loc,width,amp):
+    nePert = ne.copy()
+    E,N,U = np.meshgrid(eastVec,northVec,upVec,indexing='ij')
+    for l,w,a in zip(loc,width,amp):
+        print("Adding amp:{0:1.2e} at: {1} scale:{2:0.2f}".format(a,l,w))
+        nePert += a*np.exp(-((E-l[0])**2 + (N-l[1])**2 + (U-l[2])**2)/w**2)
+    return nePert
     
 def testSweep():
     '''Test the full system.'''
     # The priori ionosphere 
     iri = IriModel()
-    eastVec,northVec,upVec,ne = createPrioriModel(iri)
+    print("Creating priori model")
+    eastVec,northVec,upVec,nePriori = createPrioriModel(iri)
+    print("Creating perturbed model")
+    nePert = perturbModel(eastVec,northVec,upVec,nePriori,([0,0,200.],),(40.,),(1e12,))
     print("creating TCI object")
-    neTCI = TriCubic(eastVec,northVec,upVec,ne)
+    neTCI = TriCubic(eastVec,northVec,upVec,nePert)
     print("creating fermat object")
     f =  Fermat(neTCI = neTCI,type = 's')
-    print(np.min(f.nTCI.m),np.max(f.nTCI.m))
+    
+    ### test interpolation in both
+    for i in range(0):
+        x = np.random.uniform(low=eastVec[0],high=eastVec[-1])
+        y = np.random.uniform(low=northVec[0],high=northVec[-1])
+        z = np.random.uniform(low=upVec[0],high=upVec[-1])
+        n_,nx_,ny_,nz_,nxy_,nxz_,nyz_,nxyz_ = f.nTCI.interp(x,y,z,doDiff=True)
+        
+        ne,nex,ney,nez,nexy,nexz,neyz,nexyz = f.neTCI.interp(x,y,z,doDiff=True)
+        A = - 8.98**2/f.frequency**2
+        n = math.sqrt(1. + A*ne)
+        ndot = A/(2.*n)
+        nx = ndot * nex
+        ny = ndot * ney
+        nz = ndot * nez
+        ndotdot = -(A * ndot)/(2. * n**2)
+        nxy = ndotdot * nex*ney + ndot * nexy
+        nxz = ndotdot * nex * nez + ndot * nexz
+        nyz = ndotdot * ney * nez + ndot * neyz
+        print(x,y,z)
+        print(n,n_)
+        print(nx,nx_)
+        print(nxy,nxy)
+        
+    print("min and max n:",np.min(f.nTCI.m),np.max(f.nTCI.m))
     theta = np.linspace(-np.pi/15.,np.pi/15.,25)
     #phi = np.linspace(0,2*np.pi,6)
     rays = []
     origin = ac.ITRS(iri.enu.location).transform_to(iri.enu).cartesian.xyz.to(au.km).value
+    print(origin)
+    rayIdx = 0
     t1 = tictoc()
     for t in theta:
         for p in theta:
+            #print("integrating ray: {0}".format(rayIdx))
             direction = ac.SkyCoord(np.sin(t),
                                     np.sin(p),
                                     1.,frame=iri.enu).cartesian.xyz.value#.transform_to('itrs').cartesian.xyz.value
             x,y,z,s = f.integrateRay(origin,direction,1000,time=0.)
+            rayIdx += 1
             rays.append({'x':x,'y':y,'z':z,'s':s})
-    print("time:",(tictoc()-t1)/len(rays))
+    print("time per ray:",(tictoc()-t1)/len(rays))
     #print(rays)
     plotWavefront(neTCI,rays,save=False)
     #plotWavefront(f.nFunc.subs({'t':0}),rays,*getSolitonCube(sol),save = False)
     #plotFuncCube(f.nFunc.subs({'t':0}), *getSolitonCube(sol),rays=rays)
+    
+def plot_dtec(Nant,directions,dtec,title='',subAnt=None):
+    def getDatumIdx(antIdx,dirIdx,timeIdx,numDirections,numTimes):
+        '''standarizes indexing'''
+        idx = antIdx*numDirections*numTimes + dirIdx*numTimes + timeIdx
+        return idx
+    vmin = np.min(dtec)
+    vmax = np.max(dtec)
+    #data -= np.min(dtec)
+    #data /= np.max(dtec)
+    Nperaxis = int(np.ceil(np.sqrt(Nant)))
+    import pylab as plt
+    cm = plt.cm.get_cmap('RdYlBu')
+    f = plt.figure(figsize=(22,17))
+    #f,ax = plt.subplots(int(np.ceil(np.sqrt(numAntennas))),int(np.ceil(np.sqrt(numAntennas))))
+    for antIdx in range(Nant):
+        ax = plt.subplot(Nperaxis,Nperaxis,antIdx+1)
+        ax.set_title("Antenna {}".format(antIdx))
+        for dirIdx in range(len(directions)):
+            datumIdx = getDatumIdx(antIdx,dirIdx,0,len(directions),1)
+            if subAnt is not None:
+                datumIdx0 = getDatumIdx(subAnt,dirIdx,0,len(directions),1)
+                sc=ax.scatter(directions[dirIdx,0],directions[dirIdx,1],c=dtec[datumIdx]-dtec[datumIdx0],s=20**2,vmin=vmin,vmax=vmax,cmap=cm)
+            else:
+                sc=ax.scatter(directions[dirIdx,0],directions[dirIdx,1],c=dtec[datumIdx],s=20**2,vmin=vmin,vmax=vmax,cmap=cm)
+        plt.colorbar(sc)
+    if title is not "":
+        f.savefig("figs/dtec/{}.png".format(title),format='png')
+    #plt.show()
+
+def SimulatedDataInversion(numThreads = 1,noise=None):
+    '''Test the full system.'''
+    
+    def getDatumIdx(antIdx,dirIdx,timeIdx,numDirections,numTimes):
+        '''standarizes indexing'''
+        idx = antIdx*numDirections*numTimes + dirIdx*numTimes + timeIdx
+        return idx
+    
+    def reverseDatumIdx(datumIdx,numTimes,numDirections):
+        '''Reverse standardized indexing'''
+        timeIdx = datumIdx % numTimes
+        dirIdx = (datumIdx - timeIdx)/numTimes % numDirections
+        antIdx = (datumIdx - timeIdx - dirIdx*numTimes)/numTimes/numDirections
+        return antIdx, dirIdx, timeIdx
+    
+    def datumDicts2array(datumDicts):
+        '''Given a tupel of dicts where each dict is of datumIdx:value
+        convert into single array with index giving order'''
+        N = 0
+        for datumDict in datumDicts:
+            N += len(datumDict)
+        array = np.zeros(N,dtype=np.double)
+        for datumDict in datumDicts:
+            for datumIdx in datumDict.keys():#ordering set by datumIdx function 1-to-1
+                array[datumIdx] = datumDict[datumIdx]
+        return array
+
+    raylength = 2000.
+    print("Using lofar array")
+    radioArray = RadioArray(arrayFile='arrays/lofar.hba.antenna.cfg')
+    timestamp = '2017-02-7T15:37:00.000'
+    timeIdx = 0#one time stamp for now
+    numTimes = 1
+    time = at.Time(timestamp,format='isot',scale='tai')
+    enu = ENU(obstime=time,location=radioArray.getCenter().earth_location)
+    phase = ac.SkyCoord(east=0,north=0,up=1,frame=enu).transform_to(ac.ITRS(obstime=time)).transform_to('icrs')#straight up for now
+    dec = phase.dec.rad
+    ra = phase.ra.rad
+    print("Simulating observation on {0}: {1}".format(time.isot,phase))
+    
+    stations = radioArray.locs.transform_to(enu).cartesian.xyz.to(au.km).value.transpose()
+    Nant = stations.shape[0]
+    print("Using {0} stations".format(Nant))
+    #print(stations)
+    #stations = np.random.multivariate_normal([0,0,0],[[20**2,0,0],[0,20**2,0],[0,0,0.01**2]],Nant)
+    #stations = np.array([[0,0,0],[20,0,0]])
+    
+    Ndir = 5
+    fov = radioArray.getFov()#radians
+    print("Creating {0} directions in FOV of {1}".format(Ndir,fov))
+    directions = np.random.multivariate_normal([ra,dec],[[(fov/2.)**2,0],[0,(fov/2.)**2]],Ndir)
+    #print(directions)
+    
+    directions = ac.SkyCoord(directions[:,0]*au.radian,directions[:,1]*au.radian,frame='icrs').transform_to(enu).cartesian.xyz.value.transpose()
+    
+    #print(directions)
+    
+    print("Setting up tri cubic interpolator")
+    L_ne = 15.
+    
+    # The priori ionosphere 
+    iri = IriModel()
+    print("Creating priori model")
+    eastVec,northVec,upVec,nePriori = createPrioriModel(iri,L_ne)
+    print("Creating perturbed model")
+    nePert = perturbModel(eastVec,northVec,upVec,nePriori,([0,0,200.],),(40.,),(1e9,))
+    print("Creating TCI object")
+    neTCI = TriCubic(eastVec,northVec,upVec,nePert)
+    neTCIModel = TriCubic(eastVec,northVec,upVec,nePriori)
+    TCI = TriCubic(eastVec,northVec,upVec,np.zeros_like(nePert))
+    
+    print("Creating fermat object - based on a priori (second order corrections require iterating this)")
+    f =  Fermat(neTCI = neTCIModel,type = 's')
+    
+    print("Integrating rays with fermats principle")
+    t1 = tictoc()
+    rays = {}
+    for antIdx in range(Nant):
+        for dirIdx in range(Ndir):
+            datumIdx = getDatumIdx(antIdx,dirIdx,timeIdx,Ndir,numTimes)
+            origin = stations[antIdx,:]#ENU frame, later use UVW frame
+            direction = directions[dirIdx,:]
+            x,y,z,s = f.integrateRay(origin,direction,raylength,time=0.)
+            rays[datumIdx] = {'x':x,'y':y,'z':z,'s':s}   
+    Nd = len(rays)
+    print("Time (total/per ray): {0:0.2f} / {1:0.2e} s".format(tictoc()-t1,(tictoc()-t1)/Nd))
+    
+    print("Setting up ray chunks for {0} threads".format(numThreads))
+    #split up rays
+    raypack = {i:{} for i in range(numThreads)}
+    c = 0
+    for datumIdx in rays.keys():
+        raypack[c%numThreads][datumIdx] = rays[datumIdx]
+        c += 1
+     
+    def ppForwardEquation(rays,TCI,mu,Kmu,rho,Krho,numTimes,numDirections):
+        dtec, rho, Krho = ParallelInversionProducts.forwardEquations(rays,TCI,mu,Kmu,rho,Krho,numTimes,numDirections)
+        return dtec, rho, Krho
+    def ppPrimaryInversionSteps(dtec,rays,TCI,mu,Kmu,rho,Krho,muprior,rhoprior,sigma_ne,L_ne,sigma_rho,numTimes,numDirections,priorFlag=True):
+        G, CmGt, ddGdmpm = ParallelInversionProducts.primaryInversionSteps(dtec,rays,TCI,mu,Kmu,rho,Krho,muprior,rhoprior,sigma_ne,L_ne,sigma_rho,numTimes,numDirections,priorFlag=True)
+        return G, CmGt, ddGdmpm
+    def ppSecondaryInversionSteps(rays, G, CmGt, TCI, sigma_rho, Cd):
+        return ParallelInversionProducts.secondaryInversionSteps(rays, G, CmGt, TCI, sigma_rho, Cd)
+        
+    jobs = {}
+    job_server = pp.Server(numThreads, ppservers=())
+    print("Creating dTec simulated data")
+    job = job_server.submit(ppForwardEquation,
+                   args=(rays,TCI,np.log(neTCI.m/np.mean(neTCI.m)),np.mean(neTCI.m),None,None,numTimes,Ndir),
+                   depfuncs=(),
+                   modules=('ParallelInversionProducts',))
+    jobs['dtecSim'] = job
+    
+    job = job_server.submit(ppForwardEquation,
+                   args=(rays,TCI,np.log(neTCIModel.m/np.mean(neTCIModel.m)),np.mean(neTCIModel.m),None,None,numTimes,Ndir),
+                   depfuncs=(),
+                   modules=('ParallelInversionProducts',))
+    jobs['dtecModel'] = job
+        
+    dtecSim,rhoSim0, KrhoSim0 = jobs['dtecSim']()
+    dobs = datumDicts2array((dtecSim,))
+    #print("dobs: {0}".format(dobs))
+    if noise is not None:
+        print("Adding {0:0.2f}-sigma noise to simulated dtec".format(noise))
+        dtecStd = np.std(dobs)
+        dobs += np.random.normal(loc=0,scale=dtecStd*noise,size=np.size(dobs))
+    #print("dobs: {0}".format(dobs))
+    dtecModel,rhoModel0,KrhoModel0 = jobs['dtecModel']()
+    g = datumDicts2array((dtecModel,))
+    #print("g: {0}".format(g))
+    job_server.print_stats()
+    job_server.destroy()
+    
+    subAnt = None
+    plot_dtec(Nant,directions,dobs,title='sim_dtec',subAnt=subAnt)
+    plot_dtec(Nant,directions,g,title='model_dtec',subAnt=subAnt)
+    plot_dtec(Nant,directions,dobs-g,title='sim-mod_dtec',subAnt=subAnt)
+    
+    print("Setting up inversion with parameters:")
+    print("Number of rays: {0}".format(Nd))
+    print("Forward equation: g(m) = int_R^i (K_mu * EXP[mu(x)] - K_rho * EXP[rho])/TECU ds")
+    
+    #gaussian process assumption, d = g + G.dm -> Cd = Gt.Cm.G (not sure)
+    Cd = np.eye(Nd)*np.std(dobs)
+    print("<Diag(Cd)> = {0:0.2e}".format(np.mean(np.diag(Cd))))
+    
+    print("a priori model is IRI")
+    print("Define: mu(x) = LOG[ne(x) / K_mu]")
+    Kmu = np.mean(neTCIModel.m)
+    mu = np.log(neTCIModel.m/Kmu)
+    muPrior = mu.copy()
+    print("K_mu = {0:0.2e}".format(Kmu))
+    
+    #spatial-ergodic assumption
+    sigma_ne = np.std(neTCIModel.m)
+    print("Coherence scale: L_ne = {0:0.2e}".format(L_ne))
+    print("C_ne = ({0:0.2e})**2 EXP[-|x1 - x2| / {1:0.1f}]".format(sigma_ne,L_ne))
+    print("Define: rho = LOG[TEC_0 / K_rho / S]")
+    Krho = KrhoModel0
+    rho = rhoModel0
+    rhoPrior = rho.copy()
+    sigma_TEC = np.std(g*1e13)
+    sigma_rho = np.sqrt(np.log(1+(sigma_TEC/Krho/raylength)**2))
+    print("K_rho = {0:0.2e}".format(Krho))
+    print("a priori rho (reference TEC): {0}".format(rho))
+    print("sigma_rho = {0:0.2e}".format(sigma_rho))
+
+    #inversion steps
+    iter = 0
+    residuals = np.inf
+    while residuals > 1e-10:
+        print("Performing iteration: {0}".format(iter))
+        print("Performing primary inversion steps on {0}".format(numThreads))
+        job_server = pp.Server(numThreads, ppservers=())
+        
+        for i in range(numThreads):
+            job = job_server.submit(ppPrimaryInversionSteps,
+                       args=(dtecSim,raypack[i],TCI,mu,Kmu,rho,Krho,muPrior,rhoPrior,sigma_ne,L_ne,sigma_rho,numTimes,Ndir,True),
+                       depfuncs=(),
+                       modules=('ParallelInversionProducts',))
+            jobs['ppPrimaryInversionSteps_{0}'.format(i)] = job
+        G,CmGt,ddGdmpm = {},{},{}
+        for i in range(numThreads):
+            G_, CmGt_, ddGdmpm_ = jobs['ppPrimaryInversionSteps_{0}'.format(i)]()
+            #print(G_, CmGt_, ddGdmpm_)
+            G.update(G_)
+            CmGt.update(CmGt_)
+            ddGdmpm.update(ddGdmpm_)
+        job_server.print_stats()
+        job_server.destroy()
+        print("Performing secondary inversion steps")
+        job_server = pp.Server(numThreads, ppservers=())
+        for i in range(numThreads):
+            job = job_server.submit(ppSecondaryInversionSteps,
+                       args=(raypack[i], G, CmGt, neTCIModel, sigma_rhobar, Cd),
+                       depfuncs=(),
+                       modules=('ParallelInversionProducts',))
+            jobs['ppSecondaryInversionSteps_{0}'.format(i)] = job
+        S = np.zeros([Nd,Nd],dtype=np.double)
+        for i in range(numThreads):
+            S_ = jobs['ppSecondaryInversionSteps_{0}'.format(i)]()
+            S += S_
+        print("S:",S)
+        print("Inverting S")
+        T = np.linalg.pinv(S)
+        print("T:",T)
+        # dm = (mp-m) + CmGt.T.ddGdmpm
+        ddGdmpmArray = datumDicts2array([ddGdmpm])
+        TddGdmpmArray = T.dot(ddGdmpmArray)
+        CmGtArray = np.zeros([np.size(mlog),Nd])
+        for i in range(Nd):
+            CmGtArray[:,i] = CmGt[i]
+        dmlog = (mlogprior - mlog) + CmGtArray.dot(TddGdmpmArray)
+        drho = (rhoprior - rho) - sigma_rho**2/1e13*np.sum(TddGdmpmArray)
+        residuals = (np.mean(np.abs(dmlog)) / np.mean(np.abs(mlog)) + np.abs(drho/rho))/2.
+        print("Residual:",residuals)
+        print("Incrementing mlog and rho")
+        print("dmlog:",dmlog)
+        print("drho:",drho)
+        mlog += dmlog
+        rho += drho
+        job_server.print_stats()
+        job_server.destroy()
+        iter += 1
+    print('Finished inversion with {0} iterations'.format(iter))
+    #print(rays)
+    #plotWavefront(neTCI,rays,save=False)
+    #plotWavefront(f.nFunc.subs({'t':0}),rays,*getSolitonCube(sol),save = False)
+    #plotFuncCube(f.nFunc.subs({'t':0}), *getSolitonCube(sol),rays=rays)
+def LMSol(G,mprior,Cd,Cm,dobs,mu=1.,octTree=None):
+    """Assume the frechet derivative is,
+    G(x) = exp"""
+    import pylab as plt
+
+    K = np.mean(mprior)
+    mlog = np.log(mprior/K)
+
+    Cm_log = transformCov2Log(Cm,K)#np.log(1. + Cm/K**2)#transformCov2Log(Cm,mprior)
+    #Cdinv = np.linalg.pinv(Cd)
+    if octTree is not None:
+        voxels = getAllDecendants(octTree)
+        scale = np.zeros(np.size(mprior))
+        i = 0
+        while i < np.size(mprior):
+            scale[i] = voxels[i].volume**(1./3.)
+            i+= 1
+        C = np.sum(G,axis=0)/scale
+        C = C/float(np.max(C))
+        C[C==0] = np.min(C[C>0])/2.
+    else:
+        C = np.sum(G>0,axis=0)
+        plt.hist(C)
+        plt.show()
+        C = C/float(np.max(C))
+        C[C==0] = np.min(C[C>0])/2.
+        #C = np.sum(G,axis=0)
+        #C = C/np.max(C)
+    res = 1
+    iter = 0
+    while res > 1e-6 and iter < 10000:
+        #forward transform
+        #print(mlog)
+        mForward = K*np.exp(mlog)
+
+        g = G.dot(mForward)
+        J = G*mForward
+        #residuals g - dobs -> -dm
+        res = g - dobs
+        #A1 = J.transpose().dot(Cdinv)
+        #Cmlog_inv = A1.dot(J) + mu*Cm_log
+        #dm,resi,rank,s = np.linalg.lstsq(Cmlog_inv,A1.dot(res))
+        #S = mu Cd + J.Cm.J^t
+        #S = int Ri Rj k^2 exp(m(x) + m(x')) sigma^2 exp(-|x-x'|/L) + Cd
+        
+        #K int dV Cm(x,x') J(x') del(i)
+        P1 = Cm_log.dot(J.transpose())
+        smooth = np.linalg.pinv(mu*Cd + J.dot(P1))
+        dm = P1.dot(smooth).dot(res)
+        res = np.sum(dm**2)/np.sum(mlog**2)
+        print("Iter-{0} res: {1}".format(iter,res))
+        #converage learn propto length of rays in cells
+        #print(dm)
+        mlog -= dm*C
+        iter += 1
+    CmlogPost = Cm_log - P1.dot(smooth).dot(P1.transpose())
+    cmlin = transformCov2Linear(CmlogPost,K)
+    #print(CmlogPost)
+    #mMl,cmlin = metropolisPosteriorCovariance(G,dobs,Cd,CmlogPost,mlog,K)
+    #print(mMl - K*np.exp(mlog))
+    #print(transformCov2Linear(CmlogPost,K) - cmlin)
+    return K*np.exp(mlog), cmlin
+    
+    
 
 if __name__=='__main__':
     np.random.seed(1234)
     #testSquare()
-    testSweep()
+    #testSweep()
+    SimulatedDataInversion(4,noise=None)
     #testThreadedFermat()
     #testSmoothify()
     #testcseLam()

@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[25]:
+# In[ ]:
 
 '''Based on the paper doi=10.1.1.89.7835
 the tricubic interpolation of a regular possibly non uniform grid can be seen as a computation of 21 cubic splines.
@@ -12,7 +12,22 @@ grid can be reconstructed to allow full C1, and thus langrangian structures to p
 import numpy as np
 
 class TriCubic(object):
-    def __init__(self,xvec,yvec,zvec,M,useCache = True,default=None,xUniform=True,yUniform=True,zUniform = True):
+    def __init__(self,xvec,yvec,zvec,M,useCache = True,default=None,xUniform=True,yUniform=True,zUniform = True,pad=False):
+        '''Object that handles tri cubic interpolation. In general use the following parameters:
+        ``xvec`` - the xaxis (regular)
+        ``yvec`` - the yaxis (regular)
+        ``zvec`` - the zaxis (regular)
+        ``M`` - the array of shape (len(xvec),len(yvec),len(zvec)) to be interpolated
+                ``M`` will be transformed to a flat vector, member ``m``. This can be replaced and clearCache called.
+        ``useCache`` - whether to save interpolants (keep yes for efficiency when interpolants used often).
+        ``default`` - when point falls out of domain specified by xvec,yvec, zvec what value to return,
+                    None (default) means nearest.
+        ``pad`` - whether to pad array (experimental: leave False)'''
+        if pad:
+            #pad xyz vecs
+            xvec = self.padVec(xvec)
+            yvec = self.padVec(yvec)
+            zvec = self.padVec(zvec)
         self.default = default
         self.nx = np.size(xvec)
         self.ny = np.size(yvec)
@@ -30,8 +45,10 @@ class TriCubic(object):
         dz = self.zvec[1:] - self.zvec[:-1]
         self.dz = np.mean(dz)
         self.zUniform = zUniform
-            
-        self.m = M.ravel(order='C')
+        if pad:
+            self.m = self.padArray(M).ravel(order='C')
+        else:
+            self.m = M.ravel(order='C')
         self.setBinv()
         self.checkIndexing(M)
         self.useCache = useCache
@@ -40,10 +57,39 @@ class TriCubic(object):
         else:
             self.cache = None
         #print(self.iPowers,self.jPowers,self.kPowers)
+    def padVec(self,vec,padding=2):
+        size = np.size(vec)
+        dx = np.mean(vec[:-1] - vec[1:])
+        vec = np.linspace(vec[0] - padding*dx, vec[-1] + padding*dx,size +2*padding)
+        return padded
+        
+    def padArray(self,M,padding=2):
+        '''Pad 3d-array with copys of self ``padding`` elements on each axis'''
+        shape = M.shape
+        padded = np.zeros([shape[0]+2*padding,shape[1]+2*padding,shape[2]+2*padding])
+        padded[:padding,padding:padding+shape[1],padding:padding+shape[2]] += M[0,:,:]
+        padded[-padding:,padding:padding+shape[1],padding:padding+shape[2]] += M[-1,:,:]
+        
+        padded[:shape[0],:shape[1],2*padding:] += M
+        padded[:shape[0],2*padding:,:shape[2]] += M
+        padded[:shape[0],2*padding:,2*padding:] += M
+        padded[2*padding:,:shape[1],:shape[2]] += M
+        padded[2*padding:,shape[1]:,2*padding:] += M
+        padded[2*padding:,2*padding:,:shape[2]] += M
+        padded[2*padding:,2*padding:,2*padding:] += M
+        padded /= 8.
+        padded[padding:padding+shape[0],padding:padding+shape[1],padding:padding+shape[2]] = M
+        return padded
+    
     def copy(self,**kwargs):
         '''Return a copy of the TriCubic object by essentially creating a copy of all the data. 
         ``kwargs`` are the same as constructor.'''
         return TriCubic(self.xvec.copy(),self.yvec.copy(),self.zvec.copy(),self.getShapedArray().copy(),**kwargs)
+    
+    def clearCache(self):
+        '''Clear the cache, which should be done if overwriting the array'''
+        self.cache = {}
+    
     def bisection(self,array,value):
         '''Given an ``array`` , and given a ``value`` , returns an index j such that ``value`` is between array[j]
         and array[j+1]. ``array`` must be monotonic increasing. j=-1 or j=len(array) is returned
@@ -98,7 +144,10 @@ class TriCubic(object):
     def getShapedArray(self):
         '''Return the model in 3d array with proper ij ordering'''
         return self.m.reshape(self.nx,self.ny,self.nz)
-    
+    def getModelCoordinates(self):
+        X,Y,Z = np.meshgrid(self.xvec,self.yvec,self.zvec,indexing='ij')
+        return X.ravel(order='C'),Y.ravel(order='C'),Z.ravel(order='C')
+        
     def checkIndexing(self,M,N=100):
         '''Check that ordering of elements is correct'''
         N = min(N,np.size(self.m))
@@ -115,7 +164,7 @@ class TriCubic(object):
     def getInterpolant(self,x,y,z):
         '''vectorized build the interpolant'''
         xi,yi,zi = self.getInterpIndex(x,y,z)
-        print(xi,yi,zi)
+        #print(xi,yi,zi)
         try:
             ijk = self.index(xi,yi,zi)#bottom corner of cube
             if self.useCache:
@@ -139,15 +188,15 @@ class TriCubic(object):
         if xi == -1:#outside entire array
             xi = 0
         if xi == self.nx:
-            xi = self.nx-1
+            xi = self.nx-2
         if yi == -1:
             yi = 0
         if yi == self.ny:
-            yi = self.ny - 1
+            yi = self.ny - 2
         if zi == -1:
             zi = 0
         if zi == self.nz:
-            zi = self.nz - 1
+            zi = self.nz - 2
         if A_ijk is None:#outside array or near edges
             if self.default is not None:
                 f = self.default
@@ -160,7 +209,7 @@ class TriCubic(object):
         u = (x - self.xvec[xi])/(self.xvec[xi+1] - self.xvec[xi])
         v = (y - self.yvec[yi])/(self.yvec[yi+1] - self.yvec[yi])
         w = (z - self.zvec[zi])/(self.zvec[zi+1] - self.zvec[zi])
-        print(u,v,w)
+        #print(u,v,w)
         x,y,z = u,v,w
         x0 = z**2
         x1 = z**3
@@ -1266,17 +1315,19 @@ def testResult():
     fxz = lambdify((x,y,z),func.diff(x).diff(z),'numpy')
     fyz = lambdify((x,y,z),func.diff(y).diff(z),'numpy')
     fxyz = lambdify((x,y,z),func.diff(x).diff(y).diff(z),'numpy')
-    xvec = np.linspace(0,1,8)
-    yvec = np.linspace(0,1,8)
-    zvec = np.linspace(0,1,8)
+    xvec = np.linspace(-1,1.5,160)
+    yvec = np.linspace(-1,1.5,160)
+    zvec = np.linspace(-1,1.5,160)
     X,Y,Z = np.meshgrid(xvec,yvec,zvec,indexing='ij')
     M = f(X,Y,Z)
     tci = TriCubic(xvec,yvec,zvec,M,default=None)
+    res = []
     for i in range(20):
         x,y,z = np.random.uniform(size=3)
-        res = tci.interp(x,y,z,doDiff=True)
-        f_,fx_,fy_,fz_,fxy_,fxz_,fyz_,fxyz_ = res
+        f_,fx_,fy_,fz_,fxy_,fxz_,fyz_,fxyz_ = tci.interp(x,y,z,doDiff=True)
+
         try:
+            res.append(abs((f(x,y,z) - f_)/f(x,y,z)))
             print("fractional errors at:",x,y,z)
             print("f:",(f(x,y,z) - f_)/f(x,y,z))
             print("fx:",(fx(x,y,z) - fx_)/fx(x,y,z))
@@ -1288,6 +1339,10 @@ def testResult():
             print("fxyz:",(fxyz(x,y,z) - fxyz_)/fxyz(x,y,z))
         except:
             pass
+    import pylab as plt
+    plt.hist(res)
+    plt.show()
+    return
     X,Y,Z = np.meshgrid(xvec[2:-2],yvec[2:-2],zvec[2:-2],indexing='ij')
     for x,y,z in zip(X.flatten(),Y.flatten(),Z.flatten()):
         res = tci.interp(x,y,z,doDiff=True)
@@ -1309,9 +1364,4 @@ if __name__=='__main__':
     #generateBinv()
     #optimizeBvecFormation()
     testResult()
-
-
-# In[ ]:
-
-
 
