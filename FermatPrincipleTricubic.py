@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[1]:
+# In[ ]:
 
 import numpy as np
 from scipy.integrate import odeint
@@ -247,8 +247,9 @@ def plotWavefront(neTCI,rays,save=False,animate=False):
         return xs,ys,zs
     
     if rays is not None:
-        for ray in rays:
-            mlab.plot3d(ray["x"],ray["y"],ray["z"],tube_radius=1.5)
+        for datumIdx in rays.keys():
+            ray = rays[datumIdx]
+            mlab.plot3d(ray["x"],ray["y"],ray["z"],tube_radius=0.25)
         if animate:
             plt = mlab.points3d(*getWave(rays,0),color=(1,0,0),scale_mode='vector', scale_factor=10.)
             #mlab.move(-200,0,0)
@@ -460,9 +461,10 @@ def SimulatedDataInversion(numThreads = 1,noise=None):
     print("Simulating observation on {0}: {1}".format(time.isot,phase))
     
     stations = radioArray.locs.transform_to(enu).cartesian.xyz.to(au.km).value.transpose()
+    stations = stations[50:60,:]
     Nant = stations.shape[0]
     print("Using {0} stations".format(Nant))
-    #print(stations)
+    print(stations)
     #stations = np.random.multivariate_normal([0,0,0],[[20**2,0,0],[0,20**2,0],[0,0,0.01**2]],Nant)
     #stations = np.array([[0,0,0],[20,0,0]])
     
@@ -470,7 +472,7 @@ def SimulatedDataInversion(numThreads = 1,noise=None):
     fov = radioArray.getFov()#radians
     print("Creating {0} directions in FOV of {1}".format(Ndir,fov))
     directions = np.random.multivariate_normal([ra,dec],[[(fov/2.)**2,0],[0,(fov/2.)**2]],Ndir)
-    #print(directions)
+    print(directions)
     
     directions = ac.SkyCoord(directions[:,0]*au.radian,directions[:,1]*au.radian,frame='icrs').transform_to(enu).cartesian.xyz.value.transpose()
     
@@ -499,13 +501,16 @@ def SimulatedDataInversion(numThreads = 1,noise=None):
     for antIdx in range(Nant):
         for dirIdx in range(Ndir):
             datumIdx = getDatumIdx(antIdx,dirIdx,timeIdx,Ndir,numTimes)
+            #print(antIdx,dirIdx,timeIdx,datumIdx)
             origin = stations[antIdx,:]#ENU frame, later use UVW frame
             direction = directions[dirIdx,:]
             x,y,z,s = f.integrateRay(origin,direction,raylength,time=0.)
             rays[datumIdx] = {'x':x,'y':y,'z':z,'s':s}   
     Nd = len(rays)
     print("Time (total/per ray): {0:0.2f} / {1:0.2e} s".format(tictoc()-t1,(tictoc()-t1)/Nd))
-    
+    TCI.m = neTCI.m - neTCIModel.m
+    TCI.clearCache()
+    #plotWavefront(TCI,rays,save=False,animate=False)
     print("Setting up ray chunks for {0} threads".format(numThreads))
     #split up rays
     raypack = {i:{} for i in range(numThreads)}
@@ -622,22 +627,21 @@ def SimulatedDataInversion(numThreads = 1,noise=None):
         for i in range(numThreads):
             S_ = jobs['ppSecondaryInversionSteps_{0}'.format(i)]()
             S += S_
-        print("S:",S)
-        print("T:",T)
-        import pylab as plt
-        ax = plt.subplot(121)
-        ax.imshow(S)
-        plt.colorbar()
         print("Inverting S")
         T = np.linalg.pinv(S)
-        ax = plt.subplot(122)
-        ax.imshow(T)
-        plt.colorbar()
-        plt.show()
+        if False:
+            import pylab as plt
+            ax = plt.subplot(121)
+            p1 = ax.imshow(S)
+            plt.colorbar(p1)
+            ax = plt.subplot(122)
+            p2 = ax.imshow(T)
+            plt.colorbar(p2)
+            print("S:",S)
+            print("T:",T)
+        #plt.show()
         job_server.print_stats()
         job_server.destroy()
-        return
-    
         # dm = (mp-m) + CmGt.T.ddGdmpm
         ddGdmpmArray = datumDicts2array([ddGdmpm])
         TddGdmpmArray = T.dot(ddGdmpmArray)
@@ -658,7 +662,9 @@ def SimulatedDataInversion(numThreads = 1,noise=None):
         iter += 1
     print('Finished inversion with {0} iterations'.format(iter))
     #print(rays)
-    #plotWavefront(neTCI,rays,save=False)
+    TCI.m = Kmu*np.exp(mu) - neTCIModel.m
+    TCI.clearCache()
+    plotWavefront(TCI,rays,save=False)
     #plotWavefront(f.nFunc.subs({'t':0}),rays,*getSolitonCube(sol),save = False)
     #plotFuncCube(f.nFunc.subs({'t':0}), *getSolitonCube(sol),rays=rays)
 def LMSol(G,mprior,Cd,Cm,dobs,mu=1.,octTree=None):
@@ -734,6 +740,12 @@ if __name__=='__main__':
     #testThreadedFermat()
     #testSmoothify()
     #testcseLam()
+
+
+# In[7]:
+
+import numpy as np
+1./np.tan(0.5*np.pi/180.) * 1
 
 
 # In[ ]:

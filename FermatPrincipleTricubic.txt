@@ -243,7 +243,8 @@ def plotWavefront(neTCI,rays,save=False,animate=False):
         return xs,ys,zs
     
     if rays is not None:
-        for ray in rays:
+        for datumIdx in rays.keys():
+            ray = rays[datumIdx]
             mlab.plot3d(ray["x"],ray["y"],ray["z"],tube_radius=1.5)
         if animate:
             plt = mlab.points3d(*getWave(rays,0),color=(1,0,0),scale_mode='vector', scale_factor=10.)
@@ -456,6 +457,7 @@ def SimulatedDataInversion(numThreads = 1,noise=None):
     print("Simulating observation on {0}: {1}".format(time.isot,phase))
     
     stations = radioArray.locs.transform_to(enu).cartesian.xyz.to(au.km).value.transpose()
+    stations = stations[:10,:]
     Nant = stations.shape[0]
     print("Using {0} stations".format(Nant))
     #print(stations)
@@ -501,7 +503,7 @@ def SimulatedDataInversion(numThreads = 1,noise=None):
             rays[datumIdx] = {'x':x,'y':y,'z':z,'s':s}   
     Nd = len(rays)
     print("Time (total/per ray): {0:0.2f} / {1:0.2e} s".format(tictoc()-t1,(tictoc()-t1)/Nd))
-    
+    plotWavefront(neTCI,rays,save=False,animate=False)
     print("Setting up ray chunks for {0} threads".format(numThreads))
     #split up rays
     raypack = {i:{} for i in range(numThreads)}
@@ -516,8 +518,9 @@ def SimulatedDataInversion(numThreads = 1,noise=None):
     def ppPrimaryInversionSteps(dtec,rays,TCI,mu,Kmu,rho,Krho,muprior,rhoprior,sigma_ne,L_ne,sigma_rho,numTimes,numDirections,priorFlag=True):
         G, CmGt, ddGdmpm = ParallelInversionProducts.primaryInversionSteps(dtec,rays,TCI,mu,Kmu,rho,Krho,muprior,rhoprior,sigma_ne,L_ne,sigma_rho,numTimes,numDirections,priorFlag=True)
         return G, CmGt, ddGdmpm
-    def ppSecondaryInversionSteps(rays, G, CmGt, TCI, sigma_rho, Cd):
-        return ParallelInversionProducts.secondaryInversionSteps(rays, G, CmGt, TCI, sigma_rho, Cd)
+    def ppSecondaryInversionSteps(rays, G, CmGt, TCI, sigma_rho, Cd,numTimes,numDirections):
+        S = ParallelInversionProducts.secondaryInversionSteps(rays, G, CmGt, TCI, sigma_rho, Cd,numTimes,numDirections)
+        return S
         
     jobs = {}
     job_server = pp.Server(numThreads, ppservers=())
@@ -609,7 +612,7 @@ def SimulatedDataInversion(numThreads = 1,noise=None):
         job_server = pp.Server(numThreads, ppservers=())
         for i in range(numThreads):
             job = job_server.submit(ppSecondaryInversionSteps,
-                       args=(raypack[i], G, CmGt, neTCIModel, sigma_rhobar, Cd),
+                       args=(raypack[i], G, CmGt, TCI, sigma_rho, Cd,numTimes,Ndir),
                        depfuncs=(),
                        modules=('ParallelInversionProducts',))
             jobs['ppSecondaryInversionSteps_{0}'.format(i)] = job
@@ -617,27 +620,40 @@ def SimulatedDataInversion(numThreads = 1,noise=None):
         for i in range(numThreads):
             S_ = jobs['ppSecondaryInversionSteps_{0}'.format(i)]()
             S += S_
-        print("S:",S)
+        
+        import pylab as plt
+        ax = plt.subplot(121)
+        p1 = ax.imshow(S)
+        plt.colorbar(p1)
         print("Inverting S")
         T = np.linalg.pinv(S)
+        ax = plt.subplot(122)
+        p2 = ax.imshow(T)
+        plt.colorbar(p2)
+        print("S:",S)
         print("T:",T)
+        plt.show()
+        job_server.print_stats()
+        job_server.destroy()
+        return
+    
         # dm = (mp-m) + CmGt.T.ddGdmpm
         ddGdmpmArray = datumDicts2array([ddGdmpm])
         TddGdmpmArray = T.dot(ddGdmpmArray)
-        CmGtArray = np.zeros([np.size(mlog),Nd])
+        CmGtArray = np.zeros([np.size(mu)+np.size(rho),Nd])
         for i in range(Nd):
-            CmGtArray[:,i] = CmGt[i]
-        dmlog = (mlogprior - mlog) + CmGtArray.dot(TddGdmpmArray)
-        drho = (rhoprior - rho) - sigma_rho**2/1e13*np.sum(TddGdmpmArray)
-        residuals = (np.mean(np.abs(dmlog)) / np.mean(np.abs(mlog)) + np.abs(drho/rho))/2.
+            CmGtArray[:np.size(mu),i] = CmGt[i][0]
+            CmGtArray[np.size(mu):,i] = CmGt[i][1]
+        dm = CmGtArray.dot(TddGdmpmArray)
+        dmu = (muPrior - mu) + dm[:np.size(mu)]
+        drho = (rhoPrior - rho) + dm[np.size(mu):]
+        residuals = np.sum(dmu**2) / np.sum(mu**2) + np.sum(drho**2) / np.sum(rho**2)
         print("Residual:",residuals)
-        print("Incrementing mlog and rho")
-        print("dmlog:",dmlog)
+        print("Incrementing mu and rho")
+        print("dmlog:",dmu)
         print("drho:",drho)
-        mlog += dmlog
+        mu += dmu
         rho += drho
-        job_server.print_stats()
-        job_server.destroy()
         iter += 1
     print('Finished inversion with {0} iterations'.format(iter))
     #print(rays)
