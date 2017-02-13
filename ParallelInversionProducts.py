@@ -29,8 +29,10 @@ def forwardEquations(rays,TCI,mu,Kmu,rho,Krho,numTimes,numDirections):
     TCI.clearCache()
     if rho is None:
         rho = np.zeros(numDirections)
+        setList = []
+    else:
+        setList = np.arange(numDirections)
     dtec = {}
-    setList = []
     for datumIdx in rays.keys():
         antIdx, dirIdx, timeIdx = reverseDatumIdx(datumIdx,numTimes,numDirections)
         ray = rays[datumIdx]
@@ -145,7 +147,7 @@ def primaryInversionSteps(dtec,rays,TCI,mu,Kmu,rho,Krho,muprior,rhoprior,sigma_n
         for datumIdx in keys:
             ddGdmpm[datumIdx] = dd[datumIdx]
         
-    return G, CmGt, ddGdmpm
+    return G, CmGt, ddGdmpm, dd
 
 def secondaryInversionSteps(rays, G, CmGt, TCI, sigma_rho, Cd,numTimes,numDirections):
     '''Compute S = Cd + G.Cm.G^t using parameters:
@@ -184,9 +186,6 @@ def secondaryInversionSteps(rays, G, CmGt, TCI, sigma_rho, Cd,numTimes,numDirect
                 if datumIdxi != datumIdxj:
                     S[datumIdxj,datumIdxi] = S[datumIdxi,datumIdxj]
         datumIdxj += 1
-    return S
-
-            
-    
+    return S    
     
 

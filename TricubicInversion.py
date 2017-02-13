@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[ ]:
+# In[1]:
 
 from time import time as tictoc
 import numpy as np
@@ -257,9 +257,10 @@ def plot_dtec(Nant,directions,dtec,title='',subAnt=None,labels=None):
     for antIdx in range(Nant):
         ax = plt.subplot(Nperaxis,Nperaxis,antIdx+1)
         if labels is not None:
-            ax.set_title("{}".format(labels[antIdx]))
+
+            ax.text(0.05, 0.95,"{}".format(labels[antIdx]),transform=ax.transAxes,fontsize=12,weight='bold')
         else:
-            ax.set_title("Antenna {}".format(antIdx))
+            ax.text(0.05, 0.95,"Antenna {}".format(antIdx),transform=ax.transAxes,fontsize=12,weight='bold')
         for dirIdx in range(len(directions)):
             datumIdx = getDatumIdx(antIdx,dirIdx,0,len(directions),1)
             if subAnt is not None:
@@ -317,7 +318,7 @@ def SimulatedDataInversion(numThreads = 1,noise=None,eta=1.):
     labels = radioArray.labels[46:53]
     Nant = stations.shape[0]
     print("Using {0} stations".format(Nant))
-    print(stations,labels)
+    #print(stations,labels)
     #stations = np.random.multivariate_normal([0,0,0],[[20**2,0,0],[0,20**2,0],[0,0,0.01**2]],Nant)
     #stations = np.array([[0,0,0],[20,0,0]])
     
@@ -339,7 +340,7 @@ def SimulatedDataInversion(numThreads = 1,noise=None,eta=1.):
     print("Creating priori model")
     eastVec,northVec,upVec,nePriori = createPrioriModel(iri,L_ne)
     print("Creating perturbed model")
-    nePert = perturbModel(eastVec,northVec,upVec,nePriori,([0,0,200.],[20,20,350.]),(40.,40),(1e9,1e9))
+    nePert = perturbModel(eastVec,northVec,upVec,nePriori,([0,0,200.],[20,20,450.],[-100,-50,600]),(40.,40,50),(1e10,1e10,1e10))
     print("Creating TCI object")
     neTCI = TriCubic(eastVec,northVec,upVec,nePert)
     neTCIModel = TriCubic(eastVec,northVec,upVec,nePriori)
@@ -446,14 +447,17 @@ def SimulatedDataInversion(numThreads = 1,noise=None,eta=1.):
     #TCI.m = np.log(neTCI.m/Kmu) - np.log(neTCIModel.m/Kmu)
     #TCI.clearCache()
     #plotWavefront(TCI,rays,save=False,animate=False)
-
+    ddArray = dobs - g
     #inversion steps
     iter = 0
     residuals = np.inf
-    chi2 = (dobs - g).dot(np.linalg.pinv(Cd)).dot(dobs - g)
-    print("Initial chi sq = {0}".format(chi2))
+    modelFile = "results/model-{}.npz".format(0)
+    np.savez(modelFile,mu=mu,rho=rho,Kmu=Kmu,Krho=Krho)
+    print("Storing model")
     while residuals > 1e-10:
         print("Performing iteration: {0}".format(iter))
+        likelihood = np.exp(-ddArray.dot(np.linalg.pinv(Cd)).dot(ddArray)/2.)
+        print("Likelihood  = {0}".format(postLikelihood ))
         print("Performing primary inversion steps on {0}".format(numThreads))
         job_server = pp.Server(numThreads, ppservers=())
         
@@ -513,346 +517,30 @@ def SimulatedDataInversion(numThreads = 1,noise=None,eta=1.):
         
         residuals = np.sum(dmu**2) / np.sum(mu**2) + np.sum(drho**2) / np.sum(rho**2)
         ddArray = datumDicts2array([dd])
-        postLikelihood = np.exp(-ddArray.dot(np.linalg.pinv(Cd)).dot(ddArray)/2.)
         print("Residual:",residuals)
-        print("postLikelihood  = {0}".format(postLikelihood ))
         print("Incrementing mu and rho")
         print("dmu:",0.1*dmu)
         print("drho:",0.1*drho)
         mu += 0.1*dmu
         rho += 0.1*drho
+        print("Storing model")
+        modelFile = "results/model-{}.npz".format(iter)
+        np.savez(modelFile,mu=mu,rho=rho,Kmu=Kmu,Krho=Krho)
         #muPrior = mu.copy()
         #rhoPrior = rho.copy()
         
-        TCI.m = mu - np.log(neTCIModel.m/Kmu)
-        TCI.clearCache()
-        plotWavefront(TCI,rays,save=False)
-        iter += 1
-    print('Finished inversion with {0} iterations'.format(iter))
-    #print(rays)
-    TCI.m = Kmu*np.exp(mu) - neTCIModel.m
-    TCI.clearCache()
-    plotWavefront(TCI,rays,save=False)
-    #plotWavefront(f.nFunc.subs({'t':0}),rays,*getSolitonCube(sol),save = False)
-    #plotFuncCube(f.nFunc.subs({'t':0}), *getSolitonCube(sol),rays=rays)
-def SimulatedDataInversionMCMC(numThreads = 1,noise=None,eta=1.):
-    '''Invert simulated data using MCMC'''
-    from scipy.integrate import simps
-    
-    def getDatumIdx(antIdx,dirIdx,timeIdx,numDirections,numTimes):
-        '''standarizes indexing'''
-        idx = antIdx*numDirections*numTimes + dirIdx*numTimes + timeIdx
-        return idx
-    
-    def reverseDatumIdx(datumIdx,numTimes,numDirections):
-        '''Reverse standardized indexing'''
-        timeIdx = datumIdx % numTimes
-        dirIdx = (datumIdx - timeIdx)/numTimes % numDirections
-        antIdx = (datumIdx - timeIdx - dirIdx*numTimes)/numTimes/numDirections
-        return antIdx, dirIdx, timeIdx
-    
-    def datumDicts2array(datumDicts):
-        '''Given a tupel of dicts where each dict is of datumIdx:value
-        convert into single array with index giving order'''
-        N = 0
-        for datumDict in datumDicts:
-            N += len(datumDict)
-        array = np.zeros(N,dtype=np.double)
-        for datumDict in datumDicts:
-            for datumIdx in datumDict.keys():#ordering set by datumIdx function 1-to-1
-                array[datumIdx] = datumDict[datumIdx]
-        return array
-    
-    def integrate3(F,x,y,z):
-        return simps(simps(simps(F,z,axis=2),y,axis=1),x,axis=0)
-
-    def laplace(F,dx,dy,dz):
-        nx = F.shape[0]
-        ny = F.shape[1]
-        nz = F.shape[2]
-        L = np.zeros([nx,ny,nz])
-        ifac = 1./dx**2
-        jfac = 1./dy**2
-        kfac = 1./dz**2
-        ijkfac = 2.*(ifac + jfac + kfac)
-        for i in xrange(1,nx-1):
-            for j in xrange(1,ny-1):
-                for k in xrange(1,nz-1):
-                    L[i,j,k] = (F[i,j,k-1] + F[i,j,k+1])*kfac + (F[i,j-1,k] + F[i,j+1,k])*jfac + (F[i-1,j,k] + F[i+1,j,k])*ifac - F[i,j,k]*ijkfac
-        return L   
-
-    def innerProductExponentialCovariance(sigma_ne, L_ne, M, xvec, yvec, zvec):
-        L = laplace(M,xvec[1]-xvec[0],yvec[1]-yvec[0],zvec[1]-zvec[0])
-        gradx = (M[1:,:,:] - M[:-1,:,:])/(xvec[1] - xvec[0])
-        grady = (M[:,1:,:] - M[:,:-1,:])/(yvec[1] - yvec[0])
-        gradz = (M[:,:,1:] - M[:,:,:-1])/(zvec[1] - zvec[0])
-        A = integrate3(M**2,xvec,yvec,zvec)/L_ne**3
-        print(A,(8*np.pi*sigma_ne**2))
-        B = (integrate3(gradx**2,xvec[:-1],yvec,zvec)+integrate3(grady**2,xvec,yvec[:-1],zvec)+integrate3(gradz**2,xvec,yvec,zvec[:-1]))*2./L_ne
-        print(B/(8*np.pi*sigma_ne**2))
-        C = integrate3(L**2,xvec,yvec,zvec)*L_ne
-        print(C/(8*np.pi*sigma_ne**2))
-        return (A+B+C)/(8*np.pi*sigma_ne**2)
-
-    raylength = 2000.
-    print("Using lofar array")
-    radioArray = RadioArray(arrayFile='arrays/lofar.hba.antenna.cfg')
-    timestamp = '2017-02-7T15:37:00.000'
-    timeIdx = 0#one time stamp for now
-    numTimes = 1
-    time = at.Time(timestamp,format='isot',scale='tai')
-    enu = ENU(obstime=time,location=radioArray.getCenter().earth_location)
-    phase = ac.SkyCoord(east=0,north=0,up=1,frame=enu).transform_to(ac.ITRS(obstime=time)).transform_to('icrs')#straight up for now
-    dec = phase.dec.rad
-    ra = phase.ra.rad
-    print("Simulating observation on {0}: {1}".format(time.isot,phase))
-    
-    stations = radioArray.locs.transform_to(enu).cartesian.xyz.to(au.km).value.transpose()
-    stations = stations#[43:53,:]
-    labels = radioArray.labels#[43:53]
-    Nant = stations.shape[0]
-    print("Using {0} stations".format(Nant))
-    #print(stations)
-    #stations = np.random.multivariate_normal([0,0,0],[[20**2,0,0],[0,20**2,0],[0,0,0.01**2]],Nant)
-    #stations = np.array([[0,0,0],[20,0,0]])
-    
-    Ndir = 10
-    fov = radioArray.getFov()#radians
-    print("Creating {0} directions in FOV of {1}".format(Ndir,fov))
-    directions = np.random.multivariate_normal([ra,dec],[[(fov/2.)**2,0],[0,(fov/2.)**2]],Ndir)
-    #print(directions)
-    
-    directions = ac.SkyCoord(directions[:,0]*au.radian,directions[:,1]*au.radian,frame='icrs').transform_to(enu).cartesian.xyz.value.transpose()
-    
-    #print(directions)
-    
-    print("Setting up tri cubic interpolator")
-    L_ne = 15.
-    
-    # The priori ionosphere 
-    iri = IriModel()
-    print("Creating priori model")
-    eastVec,northVec,upVec,nePriori = createPrioriModel(iri,L_ne)
-    print("Creating perturbed model")
-    nePert = perturbModel(eastVec,northVec,upVec,nePriori,([0,0,200.],[20,20,350.]),(40.,40),(1e9,1e9))
-    print("Creating TCI object")
-    neTCI = TriCubic(eastVec,northVec,upVec,nePert)
-    #nePriori[:,:,:] = np.min(nePriori)
-    neTCIModel = TriCubic(eastVec,northVec,upVec,nePriori)
-    TCI = TriCubic(eastVec,northVec,upVec,np.zeros_like(nePert))
-    
-    print("Creating fermat object - based on a priori (second order corrections require iterating this)")
-    f =  Fermat(neTCI = neTCIModel,type = 's')
-    
-    print("Integrating rays with fermats principle")
-    t1 = tictoc()
-    rays = {}
-    for antIdx in range(Nant):
-        for dirIdx in range(Ndir):
-            datumIdx = getDatumIdx(antIdx,dirIdx,timeIdx,Ndir,numTimes)
-            #print(antIdx,dirIdx,timeIdx,datumIdx)
-            origin = stations[antIdx,:]#ENU frame, later use UVW frame
-            direction = directions[dirIdx,:]
-            x,y,z,s = f.integrateRay(origin,direction,raylength,time=0.)
-            rays[datumIdx] = {'x':x,'y':y,'z':z,'s':s}   
-    Nd = len(rays)
-    print("Time (total/per ray): {0:0.2f} / {1:0.2e} s".format(tictoc()-t1,(tictoc()-t1)/Nd))
-    
-    print("Setting up ray chunks for {0} threads".format(numThreads))
-    #split up rays
-    raypack = {i:{} for i in range(numThreads)}
-    c = 0
-    for datumIdx in rays.keys():
-        raypack[c%numThreads][datumIdx] = rays[datumIdx]
-        c += 1
-     
-    def ppForwardEquation(rays,TCI,mu,Kmu,rho,Krho,numTimes,numDirections):
-        dtec, rho, Krho = ParallelInversionProducts.forwardEquations(rays,TCI,mu,Kmu,rho,Krho,numTimes,numDirections)
-        return dtec, rho, Krho
-    def ppCalculateChi2(TCI,Kmu,mu,muPrior,rho,rhoPrior,sigma_ne,L_ne,sigma_rho,Cd,dd):
-        chi2 = ParallelInversionProducts.calculateChi2(TCI,Kmu,mu,muPrior,rho,rhoPrior,sigma_ne,L_ne,sigma_rho,Cd,dd)
-        return chi2
-        
-    jobs = {}
-    print("Performing mcmcm inversion steps on {0}".format(numThreads))
-    job_server = pp.Server(numThreads, ppservers=())
-    print("Creating dTec simulated data")
-    job = job_server.submit(ppForwardEquation,
-                   args=(rays,TCI,np.log(neTCI.m/np.mean(neTCI.m)),np.mean(neTCI.m),None,None,numTimes,Ndir),
-                   depfuncs=(),
-                   modules=('ParallelInversionProducts',))
-    jobs['dtecSim'] = job
-    job = job_server.submit(ppForwardEquation,
-                   args=(rays,TCI,np.log(neTCIModel.m/np.mean(neTCIModel.m)),np.mean(neTCIModel.m),None,None,numTimes,Ndir),
-                   depfuncs=(),
-                   modules=('ParallelInversionProducts',))
-    jobs['dtecModel'] = job
-        
-    dtecSim,rhoSim0, KrhoSim0 = jobs['dtecSim']()
-    dobs = datumDicts2array((dtecSim,))
-    #print("dobs: {0}".format(dobs))
-    if noise is not None:
-        print("Adding {0:0.2f}-sigma noise to simulated dtec".format(noise))
-        dtecStd = np.std(dobs)
-        dobs += np.random.normal(loc=0,scale=dtecStd*noise,size=np.size(dobs))
-    #print("dobs: {0}".format(dobs))
-    dtecModel,rhoModel0,KrhoModel0 = jobs['dtecModel']()
-    g = datumDicts2array((dtecModel,))
-    #print("g: {0}".format(g))
-    job_server.print_stats()
-    
-    subAnt = None
-    #plot_dtec(Nant,directions,dobs,title='sim_dtec',subAnt=subAnt,labels=labels)
-    #plot_dtec(Nant,directions,g,title='model_dtec',subAnt=subAnt,labels=labels)
-    #plot_dtec(Nant,directions,dobs-g,title='sim-mod_dtec',subAnt=subAnt,labels=labels)
-    
-    print("Setting up inversion with parameters:")
-    print("Number of rays: {0}".format(Nd))
-    print("Forward equation: g(m) = int_R^i (K_mu * EXP[mu(x)] - K_rho * EXP[rho])/TECU ds")
-    
-    #gaussian process assumption, d = g + G.dm -> Cd = Gt.Cm.G (not sure)
-    Cd = np.eye(Nd)*np.std(dobs)
-    print("<Diag(Cd)> = {0:0.2e}".format(np.mean(np.diag(Cd))))
-    
-    print("a priori model is IRI")
-    print("Define: mu(x) = LOG[ne(x) / K_mu]")
-    Kmu = np.mean(neTCIModel.m)
-    mu = np.log(neTCIModel.m/Kmu)
-    muPrior = mu.copy()
-    print("K_mu = {0:0.2e}".format(Kmu))
-    
-    #spatial-ergodic assumption
-    sigma_ne = np.std(neTCIModel.m)
-    #sigma_ne = 1e9
-    print("Coherence scale: L_ne = {0:0.2e}".format(L_ne))
-    print("C_ne = ({0:0.2e})**2 EXP[-|x1 - x2| / {1:0.1f}]".format(sigma_ne,L_ne))
-    print("Define: rho = LOG[TEC_0 / K_rho / S]")
-    Krho = KrhoModel0
-    rho = rhoModel0
-    rhoPrior = rho.copy()
-    sigma_TEC = np.std(g*1e13)
-    sigma_rho = np.sqrt(np.log(1+(sigma_TEC/Krho/raylength)**2))
-    print("K_rho = {0:0.2e}".format(Krho))
-    print("a priori rho (reference TEC): {0}".format(rho))
-    print("sigma_rho = {0:0.2e}".format(sigma_rho))
-    
-    TCI.m = np.log(neTCI.m/Kmu) - np.log(neTCIModel.m/Kmu)
-    TCI.clearCache()
-    #plotWavefront(TCI,rays,save=False,animate=False)
-
-    #inversion steps
-    iter = 0
-    
-    dd = dobs - g
-        
-    job = job_server.submit(ppCalculateChi2,
-               args=(TCI,Kmu,mu,muPrior,rho,rhoPrior,sigma_ne,L_ne,sigma_rho,Cd,dd),
-               depfuncs=(),
-               modules=('ParallelInversionProducts',))
-    jobs['ppCalculateChi2'] = job
-    chi2 = jobs['ppCalculateChi2']()
-    print("Initial likelihood = {0}".format(chi2))
-    mu_j = muPrior.copy()
-    rho_j = rhoPrior.copy()
-    TCI.m = (Kmu*np.exp(mu_j) - Kmu*np.exp(muPrior))**2
-    M = TCI.getShapedArray()
-    chi2_mu =  innerProductExponentialCovariance(sigma_ne, L_ne, M, TCI.xvec, TCI.yvec, TCI.zvec)
-    chi2_rho = (rho_j - rhoPrior).dot(rho_j - rhoPrior)/sigma_rho**2
-    Lj_mu = np.exp(-chi2_mu/2.)
-    Lj_rho = np.exp(-chi2_rho/2.)
-    print("Chi^2 (mu,rho): {},{}".format(chi2_mu,chi2_rho))
-    print("Li (mu,rho): {},{}".format(Lj_mu,Lj_rho))
-    muPost = [mu_j]
-    rhoPost = [rho_j]
-        
-    xmod,ymod,zmod = TCI.getModelCoordinates()
-    dmu = np.zeros_like(muPrior)
-    while iter < 1000:
-        #sample prior random walk
-        Npert = 1
-        dmu *= 0
-        for i in xrange(Npert):
-            #restrict to specfic region here if desired
-            x0 = np.random.uniform(low=TCI.xvec[0],high=TCI.xvec[-1],size=Npert)
-            y0 = np.random.uniform(low=TCI.yvec[0],high=TCI.yvec[-1],size=Npert)
-            z0 = np.random.uniform(low=TCI.zvec[0],high=TCI.zvec[-1],size=Npert)
-            dmu += np.random.uniform(low=0.001,high=0.03)* sigma_ne * np.exp(-np.sqrt((xmod-x0)**2 + (ymod-y0)**2 + (zmod-z0)**2)/L_ne)
-        dmu /= Kmu
-        dmu = np.log(dmu)
-        #dmu =  np.random.uniform(low=-np.log(1+(sigma_ne/Kmu)**2), high=np.log(1+(sigma_ne/Kmu)**2), size = np.size(mu))/30.
-        drho = np.random.uniform(low=-sigma_rho, high=sigma_rho,size=np.size(rho))/5.
-        
-        mu_i = mu_j + dmu
-        rho_i = rho_j + drho
-        #Calculate m.C.m = 1/(8 pi sigma*2) (L^-3 int m^2 + 2/L int grad m ^2 + L int lap m ^2)
-        TCI.m = (Kmu*np.exp(mu_i) - Kmu*np.exp(muPrior))
-        M = TCI.getShapedArray()
-        chi2_mu = innerProductExponentialCovariance(sigma_ne, L_ne, M, TCI.xvec, TCI.yvec, TCI.zvec)
-        chi2_rho = (rho_i - rhoPrior).dot(rho_i - rhoPrior)/sigma_rho**2
-        Li_mu = np.exp(-chi2_mu/2.)
-        Li_rho = np.exp(-chi2_rho/2.)
-        print("Chi^2 (mu,rho): {},{}".format(chi2_mu,chi2_rho))
-        print("Li (mu,rho): {},{}".format(Li_mu,Li_rho))
-        newMu = False
-        newRho = False
-        if np.random.uniform() < Li_mu/Lj_mu:
-            newMu = True
-            mu_j += dmu
-            Lj_mu = Li_mu
-        if np.random.uniform() < Li_rho/Lj_rho:
-            newRho = True
-            rho_j += drho
-            Lj_rho = Li_rho
-        #now sample posterior
-        if (not newMu) and (not newRho):
-            pass
-        muPost.append(mu_j)
-        rhoPost.append(rho_j)
-        iter += 1
-        continue
-        #propose transition   
-        muProp = mu + dmu
-        rhoProp = rho + drho
-        print("Performing iteration: {0}".format(iter))
-        job = job_server.submit(ppForwardEquation,
-                   args=(rays,TCI,muProp,Kmu,rho,Krho,numTimes,Ndir),
-                   depfuncs=(),
-                   modules=('ParallelInversionProducts',))
-        jobs['dtec'] = job
-        dtec_,rho_,Krho_ = jobs['dtec']()
-        g = datumDicts2array((dtec_,))
-        dd = dobs - g
-        
-        job = job_server.submit(ppCalculateChi2,
-                   args=(TCI,Kmu,muProp,muPrior,rhoProp,rhoPrior,sigma_ne,L_ne,sigma_rho,Cd,dd),
-                   depfuncs=(),
-                   modules=('ParallelInversionProducts',))
-        jobs['ppCalculateChi2'] = job
-        chi2Prop = jobs['ppCalculateChi2']()
-        print("Chi2Prop = {0}".format(chi2))
-        if chi2Prop > chi2 or np.random.uniform() < chi2Prop/chi2:
-            print("Incrementing mu and rho")
-            print("dmu:",dmu)
-            print("drho:",drho)
-            mu += dmu
-            rho += drho
-            chi2 = chi2Prop
-        
-        job_server.print_stats()
-
         #TCI.m = mu - np.log(neTCIModel.m/Kmu)
         #TCI.clearCache()
         #plotWavefront(TCI,rays,save=False)
         iter += 1
     print('Finished inversion with {0} iterations'.format(iter))
     #print(rays)
-    TCI.m = Kmu*np.exp(mu) - neTCIModel.m
-    TCI.clearCache()
-    plotWavefront(TCI,rays,save=False)
+    #TCI.m = Kmu*np.exp(mu) - neTCIModel.m
+    #TCI.clearCache()
+    #plotWavefront(TCI,rays,save=False)
     #plotWavefront(f.nFunc.subs({'t':0}),rays,*getSolitonCube(sol),save = False)
     #plotFuncCube(f.nFunc.subs({'t':0}), *getSolitonCube(sol),rays=rays)
-    
-    
+
 
 if __name__=='__main__':
     np.random.seed(1234)
