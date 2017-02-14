@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[1]:
+# In[ ]:
 
 from time import time as tictoc
 import numpy as np
@@ -457,7 +457,7 @@ def SimulatedDataInversion(numThreads = 1,noise=None,eta=1.):
     while residuals > 1e-10:
         print("Performing iteration: {0}".format(iter))
         likelihood = np.exp(-ddArray.dot(np.linalg.pinv(Cd)).dot(ddArray)/2.)
-        print("Likelihood  = {0}".format(postLikelihood ))
+        print("Likelihood  = {0}".format(likelihood ))
         print("Performing primary inversion steps on {0}".format(numThreads))
         job_server = pp.Server(numThreads, ppservers=())
         
@@ -529,9 +529,9 @@ def SimulatedDataInversion(numThreads = 1,noise=None,eta=1.):
         #muPrior = mu.copy()
         #rhoPrior = rho.copy()
         
-        #TCI.m = mu - np.log(neTCIModel.m/Kmu)
-        #TCI.clearCache()
-        #plotWavefront(TCI,rays,save=False)
+        TCI.m = mu - np.log(neTCIModel.m/Kmu)
+        TCI.clearCache()
+        plotWavefront(TCI,rays,save=False)
         iter += 1
     print('Finished inversion with {0} iterations'.format(iter))
     #print(rays)
