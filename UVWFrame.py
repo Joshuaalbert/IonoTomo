@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[126]:
+# In[ ]:
 
 from __future__ import (absolute_import, unicode_literals, division,
                         print_function)
@@ -73,7 +73,7 @@ class CoordinateAttribute(FrameAttribute):
 class UVW(BaseCoordinateFrame):
     """
     Written by Joshua G. Albert - albert@strw.leidenuniv.nl
-    A coordinate or frame in the East-North-Up (ENU) system.  
+    A coordinate or frame in the UVW system.  
 
     This frame has the following frame attributes, which are necessary for
     transforming from UVW to some other system:
@@ -94,14 +94,14 @@ class UVW(BaseCoordinateFrame):
     ----------
     representation : `BaseRepresentation` or None
         A representation object or None to have no data (or use the other keywords)
-    east : :class:`~astropy.units.Quantity`, optional, must be keyword
-        The east coordinate for this object (``north`` and ``up`` must also be given and
+    u : :class:`~astropy.units.Quantity`, optional, must be keyword
+        The u coordinate for this object (``v`` and ``w`` must also be given and
         ``representation`` must be None).
-    north : :class:`~astropy.units.Quantity`, optional, must be keyword
-        The east coordinate for this object (``east`` and ``up`` must also be given and
+    v : :class:`~astropy.units.Quantity`, optional, must be keyword
+        The v coordinate for this object (``u`` and ``w`` must also be given and
         ``representation`` must be None).
-    up : :class:`~astropy.units.Quantity`, optional, must be keyword
-        The east coordinate for this object (``north`` and ``east`` must also be given and
+    w : :class:`~astropy.units.Quantity`, optional, must be keyword
+        The w coordinate for this object (``u`` and ``v`` must also be given and
         ``representation`` must be None).
 
     Notes
@@ -130,8 +130,8 @@ class UVW(BaseCoordinateFrame):
 def itrs_to_uvw(itrs_coo, uvw_frame):
     '''Defines the transformation between ITRS and the UVW frame.'''
     
-    if np.any(itrs_coo.obstime != uvw_frame.obstime):
-        itrs_coo = itrs_coo.transform_to(ITRS(obstime=uvw_frame.obstime))
+    #if np.any(itrs_coo.obstime != uvw_frame.obstime):
+    #    itrs_coo = itrs_coo.transform_to(ITRS(obstime=uvw_frame.obstime))
         
     # if the data are UnitSphericalRepresentation, we can skip the distance calculations
     is_unitspherical = (isinstance(itrs_coo.data, UnitSphericalRepresentation) or
@@ -141,8 +141,8 @@ def itrs_to_uvw(itrs_coo, uvw_frame):
     lst = ac.AltAz(alt=90*u.deg,az=0*u.deg,location=uvw_frame.location,obstime=uvw_frame.obstime).transform_to(ICRS).ra
     ha = (lst - uvw_frame.phase.ra).to(u.radian).value
     dec = uvw_frame.phase.dec.to(u.radian).value
-    lonrad = lon.to(u.radian).value + ha
-    latrad = lat.to(u.radian).value + dec
+    lonrad = lon.to(u.radian).value - ha
+    latrad = dec #lat.to(u.radian).value + 
     sinlat = np.sin(latrad)
     coslat = np.cos(latrad)
     sinlon = np.sin(lonrad)
@@ -189,8 +189,8 @@ def uvw_to_itrs(uvw_coo, itrs_frame):
     lst = ac.AltAz(alt=90*u.deg,az=0*u.deg,location=uvw_coo.location,obstime=uvw_coo.obstime).transform_to(ICRS).ra
     ha = (lst - uvw_coo.phase.ra).to(u.radian).value
     dec = uvw_coo.phase.dec.to(u.radian).value
-    lonrad = lon.to(u.radian).value + ha
-    latrad = lat.to(u.radian).value + dec
+    lonrad = lon.to(u.radian).value - ha
+    latrad = dec #lat.to(u.radian).value + 
     sinlat = np.sin(latrad)
     coslat = np.cos(latrad)
     sinlon = np.sin(lonrad)
@@ -234,52 +234,63 @@ def uvw_to_uvw(from_coo, to_frame):
 if __name__ == '__main__':
     import astropy.coordinates as ac
     import astropy.time as at
-    
-    
-  
+    def compVectors(a,b):
+        a = a.cartesian.xyz.value
+        a /= np.linalg.norm(a)
+        b = b.cartesian.xyz.value
+        b /= np.linalg.norm(b)
+        h = np.linalg.norm(a-b)
+        return h < 1e-8
+    # with X - East, Z - NCP and Y - Down
     time = at.Time("2017-01-26T17:07:00.000",format='isot',scale='utc')
-    loc = ac.EarthLocation(lon=4.899431*u.deg,lat=52.379189*u.deg,height=0*u.km)
-    lst = ac.AltAz(alt=90*u.deg,az=0*u.deg,location=loc,obstime=time).transform_to(ICRS).ra
-    print(loc.to_geodetic('WGS84'))
+    loc = ac.EarthLocation(lon=10*u.deg,lat=10*u.deg,height=0*u.km)
     from ENUFrame import ENU
     enu = ENU(location=loc,obstime=time)
-    e = ac.SkyCoord(1*u.m,0*u.m,0*u.m,frame=enu)
-    ncp = ac.SkyCoord(0*u.m,np.cos(loc.geodetic[0].rad)*u.m,np.sin(loc.geodetic[0].rad)*u.m,frame=enu)
-    d = ac.SkyCoord(0*u.m,0*u.m,-1*u.m,frame=enu)
-    #test 1
-    # with X - East, Z - NCP and Y - Down
-    # when the direction of observation is the NCP (ha=0,dec=90), 
-    # the UVW coordinates are aligned with XYZ
+    x = ac.SkyCoord(1,0,0,frame=enu)
+    z = ac.SkyCoord(0,np.cos(loc.geodetic[1].rad),np.sin(loc.geodetic[1].rad),frame=enu)
+    #ncp = ac.SkyCoord(0*u.one,0*u.one,1*u.one,frame='itrs').transform_to(enu)
+    y = ac.SkyCoord(0,np.sin(loc.geodetic[1].rad),-np.cos(loc.geodetic[1].rad),frame=enu)
+    lst = ac.AltAz(alt=90*u.deg,az=0*u.deg,location=loc,obstime=time).transform_to(ICRS).ra
     #ha = lst - ra
-    ra = lst
+    print("a) when ha=0,dec=90  uvw aligns with xyz")
+    ha = 0*u.deg
+    ra = lst - ha
     dec = 90*u.deg
     phaseTrack = ac.SkyCoord(ra,dec,frame='icrs')
     uvw = UVW(obstime=time,location=loc,phase=phaseTrack)
-    U = ac.SkyCoord(1*u.m,0*u.m,0*u.m,frame=uvw).transform_to(enu)
-    V = ac.SkyCoord(0*u.m,1*u.m,0*u.m,frame=uvw).transform_to(enu)
-    W = ac.SkyCoord(0*u.m,0*u.m,1*u.m,frame=uvw).transform_to(enu)
-    print(U,e)
-    print(V,d)
-    print(W,ncp)
-    #(b) V, W and the NCP are always on a Great circle
-    print(np.cross(V.cartesian.xyz,W.cartesian.xyz).dot(ncp.cartesian.xyz))
-    #(c) when W is on the local meridian, U points East
-    print(U,e)
-    #(d) when the direction of observation is at zero declination, an hour-angle of -6 hours makes W point due East
-    ra = -6*u.hourangle
-    dec = 0*u.deg
-    phaseTrack = ac.SkyCoord(ra,dec,frame='icrs')
+    U = ac.SkyCoord(1,0,0,frame=uvw).transform_to(enu)
+    V = ac.SkyCoord(0,1,0,frame=uvw).transform_to(enu)
+    W = ac.SkyCoord(0,0,1,frame=uvw).transform_to(enu)
+    assert compVectors(U,x),"fail test a, u != x"
+    assert compVectors(V,y),"fail test a, v != y"
+    assert compVectors(W,z),"fail test a, w != z"
+    print("passed a")
+    print("b) v, w, z are always on great circle")
+    assert np.cross(V.cartesian.xyz.value,W.cartesian.xyz.value).dot(z.cartesian.xyz.value) < 1e-10, "Not on the great circle"
+    print("passed b")
+    print("c) when ha = 0 U points east")
+    ha = 0*u.deg
+    ra = lst - ha
+    dec = 35*u.deg
     phaseTrack = ac.SkyCoord(ra,dec,frame='icrs')
     uvw = UVW(obstime=time,location=loc,phase=phaseTrack)
     U = ac.SkyCoord(1*u.m,0*u.m,0*u.m,frame=uvw).transform_to(enu)
     V = ac.SkyCoord(0*u.m,1*u.m,0*u.m,frame=uvw).transform_to(enu)
     W = ac.SkyCoord(0*u.m,0*u.m,1*u.m,frame=uvw).transform_to(enu)
-    print(W,e)
-    #(b) V, W and the NCP are always on a Great circle
-    print(np.cross(V.cartesian.xyz,W.cartesian.xyz).dot(ncp.cartesian.xyz))
-
-
-# In[ ]:
-
-
+    assert np.cross(V.cartesian.xyz.value,W.cartesian.xyz.value).dot(z.cartesian.xyz.value) < 1e-10, "Not on the great circle"
+    east = ac.SkyCoord(1,0,0,frame=enu)
+    assert compVectors(U,east),"fail test c, u != east"
+    print("passed c")
+    print("d) when dec=0 and ha = -6 w points east")
+    ha = -6*u.hourangle
+    ra = lst - ha
+    dec = 0*u.deg
+    phaseTrack = ac.SkyCoord(ra,dec,frame='icrs')
+    uvw = UVW(obstime=time,location=loc,phase=phaseTrack)
+    U = ac.SkyCoord(1*u.m,0*u.m,0*u.m,frame=uvw).transform_to(enu)
+    V = ac.SkyCoord(0*u.m,1*u.m,0*u.m,frame=uvw).transform_to(enu)
+    W = ac.SkyCoord(0*u.m,0*u.m,1*u.m,frame=uvw).transform_to(enu)
+    assert np.cross(V.cartesian.xyz.value,W.cartesian.xyz.value).dot(z.cartesian.xyz.value) < 1e-10, "Not on the great circle"
+    assert compVectors(W,east),"fail test d, w != east"
+    print("passed d")
 

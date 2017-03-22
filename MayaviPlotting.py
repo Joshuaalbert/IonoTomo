@@ -10,7 +10,10 @@
 from mayavi import mlab
 import numpy as np
 
-def plotWavefront(neTCI,rays,save=False,animate=False):
+def plotWavefront(neTCI,rays,save=False,saveFile=None,animate=False):
+    if saveFile is None:
+        saveFile = "figs/wavefront.png"
+    print("Saving to: {0}".format(saveFile))
     xmin = neTCI.xvec[0]
     xmax = neTCI.xvec[-1]
     ymin = neTCI.yvec[0]
@@ -24,10 +27,11 @@ def plotWavefront(neTCI,rays,save=False,animate=False):
     
     #reshape array
     data = neTCI.getShapedArray()
-    print(np.mean(data),np.max(data),np.min(data))
-    l = mlab.pipeline.volume(mlab.pipeline.scalar_field(X,Y,Z,data))#,vmin=min, vmax=min + .5*(max-min))
-    l._volume_property.scalar_opacity_unit_distance = min((xmax-xmin)/4.,(ymax-ymin)/4.,(zmax-zmin)/4.)
-    l._volume_property.shade = False
+    #print(np.mean(data),np.max(data),np.min(data))
+    #mlab.close()
+    #l = mlab.pipeline.volume(mlab.pipeline.scalar_field(X,Y,Z,data))#,vmin=min, vmax=min + .5*(max-min))
+    #l._volume_property.scalar_opacity_unit_distance = min((xmax-xmin)/4.,(ymax-ymin)/4.,(zmax-zmin)/4.)
+    #l._volume_property.shade = False
     mlab.contour3d(X,Y,Z,data,contours=5,opacity=0.2)
     mlab.colorbar()
     
@@ -71,14 +75,72 @@ def plotWavefront(neTCI,rays,save=False,animate=False):
                         yield
                     save = False
             anim()
-    mlab.show()
-    if save and rays is not None:
-        return
+    
+    if save and animate:
         import os
         os.system('ffmpeg -r 10 -f image2 -s 1900x1080 -i figs/wavefronts/wavefront_%04d.png -vcodec libx264 -crf 25  -pix_fmt yuv420p figs/wavefronts/wavefront.mp4')
-
+    else:
+        if save:
+            mlab.savefig(saveFile,figure=mlab.gcf())
+        else:
+            mlab.show()
+            
+            
 def plotModel(neTCI,save=False):
     '''Plot the model contained in a tricubic interpolator (a convienient container for one)'''
     plotWavefront(neTCI,None,save=save)
     
+def animateResults(files):
+    from TricubicInterpolation import TriCubic
+    import os
+    images = []
+    index = 0
+    for file in files:
+        abspath = os.path.abspath(file)
+        print("Plotting: {0}".format(abspath))
+        if os.path.isfile(abspath):
+            dir = os.path.dirname(abspath)
+            froot = os.path.split(abspath)[1].split('.')[0]
+        else:
+            continue
+        data = np.load(abspath)
+        xvec = data['xvec']
+        yvec = data['yvec']
+        zvec = data['zvec']
+        M = data['M']
+        Kmu = data['Kmu'].item(0)
+        rho = data['rho']
+        Krho = data['Krho'].item(0)
+        if 'rays' in data.keys():
+            rays = data['rays'].item(0)
+        else:
+            rays = None
+        TCI = TriCubic(xvec,yvec,zvec,M)
+        TCI.clearCache()
+        images.append("{0}/frame-{1:04d}.png".format(dir,index))
+        plotWavefront(TCI,rays,save=True,saveFile=images[-1],animate=False)
+        index += 1
+    os.system('ffmpeg -r 10 -f image2 -s 1900x1080 -i {0}/frame-%04d.png -vcodec libx264 -crf 25  -pix_fmt yuv420p {1}/solution_animation.mp4'.format(dir,dir))
+    print("Saved to {1}/solution_animation.mp4".format(dir))
+    
+if __name__ == '__main__':
+    import glob
+    files = glob.glob("results/model-*.npz")
+    animateResults(files)
+    
+
+
+# In[1]:
+
+from mayavi import mlab
+
+
+# In[10]:
+
+help(mlab.clf)
+
+
+# In[ ]:
+
+
 

@@ -14,41 +14,31 @@ from Geometry import *
 import dill
 dill.settings['recurse'] = True
 
-def getDatumIdx(antIdx,dirIdx,timeIdx,numDirections,numTimes):
+import os
+
+def getDatumIdx(antIdx,timeIdx,dirIdx,numAnt,numTimes):
     '''standarizes indexing'''
-    idx = antIdx*numDirections*numTimes + dirIdx*numTimes + timeIdx
+    idx = antIdx + numAnt*(timeIdx + numTimes*dirIdx)
     return idx
 
-def getDatum(datumIdx,numDirections,numTimes):
-    timeIdx = datumIdx % numTimes
-    dirIdx = (datumIdx - timeIdx)/numTimes % numDirections
-    antIdx = (datumIdx - timeIdx - dirIdx*numTimes)/numDirections/numTimes
-    return antIdx,dirIdx,timeIdx
+def getDatum(datumIdx,numAnt,numTimes):
+    antIdx = datumIdx % numAnt
+    timeIdx = (datumIdx - antIdx)/numAnt % numTimes
+    dirIdx = (datumIdx - antIdx - numAnt*timeIdx)/numAnt/numTimes
+    return antIdx,timeIdx,dirIdx
 
 class DataPack(object):
     def __init__(self,dataDict):
         '''get the astropy object defining rays and then also the dtec data'''
-        self.antennas = dataDict['antennas']#a dictionary {antIdx:itrs,...}
+        self.antennas = dataDict['antennas']#a dictionary {antIdx:label,...}
         self.numAnt = len(self.antennas)
         self.times = dataDict['times']#a dictionary {timeIdx:time,...}
         self.numTimes = len(self.times)
         self.directions = dataDict['directions']#a dictionary {dirIdx:icrs}
         self.numDir = len(self.directions)
         self.dtec = dataDict['dtec'] #a dictionary {datumIdx: data}
-        self.radioArray = dataDict['radioArray']
-        
-    def getDatumIdx(self,antIdx,dirIdx,timeIdx):
-        '''Map antIdx, dirIdx, and timeIdx to a invertable index'''
-        idx = antIdx*self.numDir*self.numTimes + dirIdx*self.numTimes + timeIdx
-        return idx
+        self.radioArray = dataDict['radioArray'] #radioArray containing antenna information
 
-    def getInvertDatumIdx(self,datumIdx):
-        '''Map the datumIdx to specific antidx, dirIdx, and timeIdx'''
-        timeIdx = datumIdx % self.numTimes
-        dirIdx = (datumIdx - timeIdx)/self.numTimes % self.numDirections
-        antIdx = (datumIdx - timeIdx - dirIdx*self.numTimes)/self.numDirections/self.numTimes
-        return antIdx,dirIdx,timeIdx  
-        
     def get_dtec_array(self,antIdx=[],timeIdx=[], dirIdx=[]):
         '''Retrieve the specified dtec solutions'''
         if antIdx is -1:
@@ -66,10 +56,11 @@ class DataPack(object):
             while j < len(timeIdx):
                 k = 0
                 while k < len(dirIdx):
-                    datumIdx = self.getDatumIdx(antIdx[i],timeIdx[j],dirIdx[k])
+                    datumIdx = getDatumIdx(antIdx[i],timeIdx[j],dirIdx[k],self.numAnt,self.numTimes)
                     if datumIdx in self.dtec.keys():
-                        output[i,j,k] = self.dtec[dataIdx]
+                        output[i,j,k] = self.dtec[datumIdx]
                     else:
+                        print('{0} not a valid datumidx'.format(datumIdx))
                         output[i,j,k] = np.nan
                     k += 1
                 j += 1
@@ -77,20 +68,20 @@ class DataPack(object):
         return output
     
     def get_antennas_array(self,antIdx=[]):
+        '''Get the array of antenna locations'''
         if antIdx is -1:
             antIdx = self.antennas.keys()
         output = np.zeros([len(antIdx),3],dtype=np.double)
+        locs = self.radioArray.locs.cartesian.xyz.to(au.km).value.transpose()
         i = 0
         while i < len(antIdx):
-            if antIdx[i] in self.antennas.keys():
-                output[i,:] = self.antennas[antIdx[i]].transform_to(ac.ITRS).cartesian.xyz.to(au.km).value
-            else:
-                output[i,:] = np.nan
+            idx = self.radioArray.getAntennaIdx(self.antennas[antIdx[i]])
+            loc = locs[idx,:]
             i += 1
         return output
     
     def get_times_array(self,timeIdx=[]):
-        '''Get the ISO time'''
+        '''Get the gps times'''
         if timeIdx is -1:
             timeIdx = self.times.keys()
         output = np.zeros(len(timeIdx),dtype=np.double)
@@ -103,6 +94,36 @@ class DataPack(object):
             i += 1
         return output
     
+    def get_rays(self,antIdx=[],timeIdx=[], dirIdx=[]):
+        '''Retrieve the specified rays, R^ijk'''
+        if antIdx is -1:
+            antIdx = self.antennas.keys()
+        if timeIdx is -1:
+            timeIdx = self.times.keys()
+        if dirIdx is -1:
+            dirIdx = self.directions.keys()
+        rays = {}
+        j = 0
+        while j < len(timeIdx):
+            enu = ENU(location=self.radioArray.getCenter().earth_location,obstime=self.times[timeIdx[j]])
+            i = 0
+            while i < len(antIdx):
+                idx = self.radioArray.getAntennaIdx(self.antennas[antIdx[i]])
+                origin = self.radioArray.locs[idx].transform_to(enu).cartesian.xyz.to(au.km).value
+                k = 0
+                while k < len(dirIdx):
+                    dir = self.directions[dirIdx[k]].transform_to(enu).cartesian.xyz.value
+                    datumIdx = getDatumIdx(antIdx[i],timeIdx[j],dirIdx[k],self.numAnt,self.numTimes)
+                    if datumIdx in self.dtec.keys():
+                        output[i,j,k] = self.dtec[datumIdx]
+                    else:
+                        print('{0} not a valid datumidx'.format(datumIdx))
+                        output[i,j,k] = np.nan
+                    k += 1
+                i += 1
+            j += 1
+        return output
+    
     def get_directions_array(self, timeIdx=[], dirIdx=[]):
         '''Get the array of directions in itrs'''
         if timeIdx is -1:
@@ -110,7 +131,7 @@ class DataPack(object):
         if dirIdx is -1:
             dirIdx = self.directions.keys()
         #output = np.zeros([len(dirIdx),3],dtype=np.double)
-        output = np.zeros([len(timeIdx),len(dirIdx),3],dtype=np.double)
+        output = np.zeros([len(timeIdx)*len(dirIdx),3],dtype=np.double)
         #grab data
         
         j = 0
@@ -122,49 +143,49 @@ class DataPack(object):
                 k += 1
             j += 1
         return output
-                    
-        
     
-def PrepareData(infoFile,dataFolder,timeStart = 0, timeEnd = 0,arrayFile='arrays/lofar.hba.antenna.cfg',load=False):
-    '''Prepare data for continuous inversion. RadioArray, dobs, Cd, and rays.
-    Tec is always relative to first antenna[0]
-    Output coords are ENU frame'''
+def PrepareData(infoFile,dataFolder,timeStart = 0, timeEnd = -1,arrayFile='arrays/lofar.hba.antenna.cfg',
+                load=False,dataFilePrefix='inversion_dTEC'):
+    '''Grab real data from soltions products. 
+    Stores in a DataPack object.'''
     
-    print("creating radio array")
-    radioArray = RadioArray(arrayFile)
-    dataFile = "TecInversionData.npz"
-    generate = True
-    if load:
-        print("Loading:",dataFile)
+    assert os.path.isdir(dataFolder), "{0} is not a directory".format(dataFolder)
+    dataFile = "{0}/{1}.dill".format(dataFolder,dataFilePrefix)
+    print("Checking for existing preprocessed data.")
+    if os.path.isfile(dataFile):
+        #try to load
         try:
-            #TecData = np.load(dataFile)
-            #dataDict = TecData['dataDict']
-            f = open(dataFile,'wb')
+            f = open(dataFile,'rb')
             dataDict = dill.load(f)
+            print("Loaded real data from {0}".format(dataFile))
             f.close()
             generate = False
         except:
-            #print(TecData.keys())
-            pass
+            print("Failed to load data")
+            generate = True
+    else:
+        generate = True
     if generate:
-
+        print("Generating data using solutions in {0}".format(dataFolder))
+        print("Using radio array file: {}".format(arrayFile))
+        radioArray = RadioArray(arrayFile,frequency=150e6)#set frequency from solutions too
         #get patch names and directions for dataset
         info = np.load(infoFile)
+        #these define the direction order
         patches = info['patches']
         numPatches = len(patches)
         radec = info['directions']
-        print("Loaded {0} patches".format(numPatches))
-        #get array stations (shoud fold this into radioArray. todo)
-        stationLabels = np.genfromtxt(arrayFile, comments='#',usecols = (4),dtype=type(""))
-        stationLocs = np.genfromtxt(arrayFile, comments='#',usecols = (0,1,2))
-        numStations = len(stationLabels)
+        print("Loaded {0} directions".format(numPatches))
+        
+        #get array stations (they must be in the array file to be considered for data packaging)
+        radioArray = RadioArray(arrayFile)
+        stationLabels = radioArray.labels
+        stationLocs = radioArray.locs.cartesian.xyz.transpose()
+        numStations = radioArray.Nantennas
         print("Number of stations in array: {0}".format(numStations))
 
-        numTimes =  (timeEnd - timeStart + 1)
-        print("Number of time stamps: {0}".format(numTimes))
         #each time gives a different direction for each patch
-        numDirs = numTimes * numPatches #maybe a file doesn't load
-        print("Number of possible directions: {0}".format(numDirs))
+        #numDirs = numTimes * numPatches #maybe a file doesn't load
         
         outAntennas = {}
         outTimes = {}
@@ -178,12 +199,12 @@ def PrepareData(infoFile,dataFolder,timeStart = 0, timeEnd = 0,arrayFile='arrays
             rd = radec[patchIdx]
             dir = ac.SkyCoord(rd.ra,rd.dec,frame='icrs')
             
-            #find the appropriate file
+            #find the appropriate file (this will be standardized later)
             files = glob.glob("{0}/*_{1}_*.npz".format(dataFolder,patch))
             if len(files) == 1:
                 file = files[0]
             else:
-                print('Could not find patch: {0}'.format(patch))
+                print('Too many files found. Could not find patch: {0}'.format(patch))
                 patchIdx += 1
                 continue
             print("Loading data file: {0}".format(file))
@@ -194,10 +215,11 @@ def PrepareData(infoFile,dataFolder,timeStart = 0, timeEnd = 0,arrayFile='arrays
                 failed += 1
                 patchIdx += 1
                 continue
-            #internal data of each patch file
+            #internal data of each patch file (directions set by infoFile)
             antennas = d['antennas']
-            times = d['times'][timeStart:timeEnd+1]#gps tai
-            tecData = d['data'][timeStart:timeEnd+1,:]#times x antennas
+            times = d['times'][timeStart:timeEnd]#gps tai
+            numTimes = len(times)
+            tecData = d['data'][timeStart:timeEnd,:]#times x antennas
             timeIdx = 0
             while timeIdx < numTimes:
 
@@ -206,24 +228,18 @@ def PrepareData(infoFile,dataFolder,timeStart = 0, timeEnd = 0,arrayFile='arrays
                 
                 # get direction of patch at time wrt fixed frame
                 
-                
                 antIdx = 0#index in solution table
+                numAnt = len(antennas)
                 while antIdx < len(antennas):
                     ant = antennas[antIdx]
-                    #find index in stationLabels
-                    labelIdx = 0
-                    while labelIdx < numStations:
-                        if stationLabels[labelIdx] == ant:
-                            break
-                        labelIdx += 1
-                    if labelIdx >= numStations:
-                        print("Could not find {0} in available stations: {1}".format(ant,stationLabels))
-                        continue
-                    datumIdx = getDatumIdx(antIdx,patchIdx,timeIdx,numPatches,numTimes)
+                    labelIdx = radioArray.getAntennaIdx(ant)
+                    if labelIdx is None:
+                        print("failed to find {}".format(ant))
+                    datumIdx = getDatumIdx(antIdx,timeIdx,patchIdx,numAnt,numTimes)
                     
                     #ITRS WGS84
-                    stationLoc = ac.SkyCoord(*stationLocs[labelIdx]*au.m,obstime=time,frame='itrs')
-                    outAntennas[antIdx] = stationLoc
+                    stationLoc = ac.SkyCoord(*stationLocs[labelIdx,:],obstime=time,frame='itrs')
+                    outAntennas[antIdx] = ant
                     outTimes[timeIdx] = time
                     outDirections[patchIdx] = dir
                     outDtec[datumIdx] = tecData[timeIdx,antIdx]
@@ -235,8 +251,7 @@ def PrepareData(infoFile,dataFolder,timeStart = 0, timeEnd = 0,arrayFile='arrays
         f = open(dataFile,'wb')
         dill.dump(dataDict,f)
         f.close()
-        #np.savez(dataFile, dataDict = dataDict)
-        return DataPack(dataDict)
+    return DataPack(dataDict)
     
 def plotDataPack(dataPack):
     import pylab as plt
@@ -270,4 +285,19 @@ if __name__ == '__main__':
     plotDataPack(dataPack)
    
         
+
+
+# In[1]:
+
+import os
+
+
+# In[3]:
+
+help(os.path.isfile)
+
+
+# In[ ]:
+
+
 

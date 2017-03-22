@@ -272,6 +272,20 @@ def plot_dtec(Nant,directions,dtec,title='',subAnt=None,labels=None):
     if title is not "":
         f.savefig("figs/dtec/{}.png".format(title),format='png')
     #plt.show()
+    
+def plotHeightProfile(TCI,ax=None,show=True):
+    import pylab as plt
+    if ax is None:
+        plt.figure()
+        ax = plt.subplot(111)
+    M = TCI.getShapedArray()
+    height = TCI.zvec
+    Mz = np.mean(np.mean(M,axis=0),axis=0)
+    ax.plot(height,Mz)
+    if show:
+        plt.show()
+    else:
+        return ax
 
 def SimulatedDataInversion(numThreads = 1,noise=None,eta=1.):
     '''Test the full system.'''
@@ -444,9 +458,10 @@ def SimulatedDataInversion(numThreads = 1,noise=None,eta=1.):
     print("a priori rho (reference TEC): {0}".format(rho))
     print("sigma_rho = {0:0.2e}".format(sigma_rho))
     
-    #TCI.m = np.log(neTCI.m/Kmu) - np.log(neTCIModel.m/Kmu)
+    TCI.m = np.log(neTCI.m/Kmu) - np.log(neTCIModel.m/Kmu)
     #TCI.clearCache()
     #plotWavefront(TCI,rays,save=False,animate=False)
+    ax=plotHeightProfile(TCI,ax=None,show=False)
     ddArray = dobs - g
     #inversion steps
     iter = 0
@@ -521,17 +536,26 @@ def SimulatedDataInversion(numThreads = 1,noise=None,eta=1.):
         print("Incrementing mu and rho")
         print("dmu:",0.1*dmu)
         print("drho:",0.1*drho)
-        mu += 0.1*dmu
-        rho += 0.1*drho
+        mu += dmu
+        rho += drho
         print("Storing model")
         modelFile = "results/model-{}.npz".format(iter)
-        np.savez(modelFile,mu=mu,rho=rho,Kmu=Kmu,Krho=Krho)
+        TCI.m = mu - np.log(neTCIModel.m/Kmu)
+        np.savez(modelFile,xvec=TCI.xvec,yvec=TCI.yvec,zvec=TCI.zvec,
+                 M=TCI.getShapedArray(),Kmu=Kmu,rho=rho,Krho=Krho,rays=rays)
         #muPrior = mu.copy()
         #rhoPrior = rho.copy()
         
         TCI.m = mu - np.log(neTCIModel.m/Kmu)
-        TCI.clearCache()
-        plotWavefront(TCI,rays,save=False)
+        #TCI.m = np.log(neTCI.m/Kmu)# - np.log(neTCIModel.m/Kmu)
+        #TCI.clearCache()
+        #plotWavefront(TCI,rays,save=False,animate=False)
+        if iter == 5:
+            plotHeightProfile(TCI,ax=ax,show=True)
+        else:
+            plotHeightProfile(TCI,ax=ax,show=False)
+        #TCI.clearCache()
+        #plotWavefront(TCI,rays,save=False)
         iter += 1
     print('Finished inversion with {0} iterations'.format(iter))
     #print(rays)
@@ -546,7 +570,7 @@ if __name__=='__main__':
     np.random.seed(1234)
     #testSquare()
     #testSweep()
-    SimulatedDataInversion(4,noise=None,eta=1.)
+    SimulatedDataInversion(5,noise=None,eta=1.)
     #SimulatedDataInversionMCMC(4,noise=None,eta=1.)
     #testThreadedFermat()
     #testSmoothify()

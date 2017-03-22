@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[63]:
+# In[ ]:
 
 from __future__ import (absolute_import, unicode_literals, division,
                         print_function)
@@ -45,10 +45,10 @@ class ENU(BaseCoordinateFrame):
         The east coordinate for this object (``north`` and ``up`` must also be given and
         ``representation`` must be None).
     north : :class:`~astropy.units.Quantity`, optional, must be keyword
-        The east coordinate for this object (``east`` and ``up`` must also be given and
+        The north coordinate for this object (``east`` and ``up`` must also be given and
         ``representation`` must be None).
     up : :class:`~astropy.units.Quantity`, optional, must be keyword
-        The east coordinate for this object (``north`` and ``east`` must also be given and
+        The up coordinate for this object (``north`` and ``east`` must also be given and
         ``representation`` must be None).
 
     Notes

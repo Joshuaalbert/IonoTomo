@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[58]:
+# In[ ]:
 
 import astropy.coordinates as ac
 import astropy.units as au
@@ -9,19 +9,9 @@ import astropy.time as at
 import numpy as np
 
 class RadioArray(object):
-    '''Handles the radio array object'''
-    def __init__(self,arrayFile = None,antennaPos=None,logger = None,name = None,msFile=None,numAntennas=0,earthLocs=None,frequency=120e6):
-        self.frequency = frequency
-        if logger is not None:
-            try:
-                self.log = logger.log
-            except:
-                print("Creating logger")
-                from Logger import Logger
-                logger = Logger()
-                self.log = logger.log
-        else:
-            self.log = None
+    '''Handles the radio array object.'''
+    def __init__(self,arrayFile = None,antennaPos=None,name = None,msFile=None,numAntennas=0,earthLocs=None,frequency=120e6):
+        self.frequency = frequency#can be widebandwidth later
         self.Nantenna = 0
         if arrayFile is not None:
             self.arrayFile = arrayFile
@@ -38,10 +28,8 @@ class RadioArray(object):
             self.diameters = d['diameter']
             self.labels = d['station_label']
             self.locs = ac.SkyCoord(x=d['X']*au.m,y=d['Y']*au.m,z=d['Z']*au.m,frame='itrs')
-            self.Nantenna = np.size(d['X'])
+            self.Nantenna = int(np.size(d['X']))
         except:
-            types = np.dtype({'names':['X','Y','Z','diameter','station_label'],
-                             'formats':[np.double,np.double,np.double,np.double,'S16']})
             d = np.genfromtxt(arrayFile,comments = '#',usecols=(0,1,2))
             self.locs = ac.SkyCoord(x=d[:,0]*au.m,y=d[:,1]*au.m,z=d[:,2]*au.m,frame='itrs')
             self.Nantenna = d.shape[0]
@@ -49,17 +37,31 @@ class RadioArray(object):
             self.diameters = None
         self.calcCenter()
         
-    def getFov(self,frequency=120e6):
+    def getFov(self):
         '''get the field of view in radians'''
         return 4.*np.pi/180.
     
     def saveArrayFile(self,arrayFile):
+        import time
         locs = self.locs.cartesian.xyz.to(au.m).value.transpose()
-        array = np.hstack([locs[0,:],locs[1,:],locs[2,:],self.diameters,self.labels])
-        np.savetxt(arrayFile, array, fmt=['%.18e','%.18e','%.18e','%.6e','%s'], delimiter=',', newline='\n', header='ITRS (m)\nX,Y,Z', footer='', comments='# ')
+        f = open(arrayFile,'w')
+        f.write('# Created on {0} by Joshua G. Albert\n'.format(time.strftime("%a %c",time.localtime())))
+        f.write('# ITRS(m)\n')
+        f.write('# X\tY\tZ\tdiameter\tlabels\n')
+        i = 0
+        while i < self.Nantenna:
+            if self.diameters is not None:
+                f.write('{0:1.9e}\t{1:1.9e}\t{2:1.9e}\t{3:1.4e}\t{4}'.format(locs[i,0],locs[i,1],locs[i,2],self.diameters[i],self.labels[i]))
+            else:
+                f.write('{0:1.9e}\t{1:1.9e}\t{2:1.9e}\t{3:d}\t{4}'.format(locs[i,0],locs[i,1],locs[i,2],-1,self.labels[i]))
+            if i < self.Nantenna-1:
+                f.write('\n')
+            i += 1
+        f.close()
         
     def loadPosArray(self,antennaPos):
-        '''Load pos is shape (N,3), typically grabbed from a ms/ANTENNA table'''
+        '''Load pos is shape (N,3), typically grabbed from a ms/ANTENNA table.
+        Assumes it is in ITRS(m)'''
         self.locs = ac.SkyCoord(x=antennaPos[:,0]*au.m,y=antennaPos[:,1]*au.m,z=antennaPos[:,2]*au.m,frame='itrs')
         self.Nantenna = antennaPos.shape[0]
         self.calcCenter()
@@ -74,12 +76,23 @@ class RadioArray(object):
         return self.center
     
     def getCenter(self):
+        '''Return the ITRS center of the array'''
         try:
             return self.center
         except:
             self.calcCenter()
             self.log("Center of array: {0}".format(self.center))
             return self.center
+    
+    def getAntennaIdx(self,name):
+        '''Retrieve the index of the given name from labels.
+        Returns None if no match.'''
+        i = 0
+        while i < self.Nantenna:
+            if self.labels[i] == name:
+                return i
+            i += 1
+        return None
 
 if __name__=='__main__':
     #from Logger import Logger
@@ -97,6 +110,8 @@ if __name__=='__main__':
     print(ac.SkyCoord(alt=90*au.deg,az=0*au.deg,frame=aa).transform_to('icrs'))
     print(ac.SkyCoord(alt=90*au.deg,az=0*au.deg,frame=aa).transform_to(enu).transform_to('icrs'))
     print(ac.SkyCoord(east=0,north=0,up=1,frame=enu).transform_to('icrs').dec)
+    radioArray.saveArrayFile('arrays/testarray.csv')
+    print(radioArray.center.earth_location)
     #print radioArray.center.earth_location.height
     #times = at.Time([0,2,4]*au.s,format='gps',scale='utc')
     #radioArray.calcBaselines(times,np.array([12,62]))
