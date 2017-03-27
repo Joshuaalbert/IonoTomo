@@ -1,38 +1,127 @@
 
 # coding: utf-8
 
-# In[3]:
+# In[1]:
 
 ### contains tasks to be run in parallel with pp
 
-def getDatumIdx(antIdx,dirIdx,timeIdx,numDirections,numTimes):
+def getDatumIdx(antIdx,timeIdx,dirIdx,numAnt,numTimes):
     '''standarizes indexing'''
-    idx = antIdx*numDirections*numTimes + dirIdx*numTimes + timeIdx
+    idx = antIdx + numAnt*(timeIdx + numTimes*dirIdx)
     return idx
+
+def getDatum(datumIdx,numAnt,numTimes):
+    antIdx = datumIdx % numAnt
+    timeIdx = (datumIdx - antIdx)/numAnt % numTimes
+    dirIdx = (datumIdx - antIdx - numAnt*timeIdx)/numAnt/numTimes
+    return antIdx,timeIdx,dirIdx
+
+def fetchPatch(patchFile,timeStart,timeEnd,radioArray):
+    import numpy as np
+    import astropy.units as au
+    import astropy.time as at
+    import astropy.coordinates as ac
+    from ProgressBarClass import ProgressBar
     
-def reverseDatumIdx(datumIdx,numTimes,numDirections):
-    '''Reverse standardized indexing'''
-    timeIdx = datumIdx % numTimes
-    dirIdx = (datumIdx - timeIdx)/numTimes % numDirections
-    antIdx = (datumIdx - timeIdx - dirIdx*numTimes)/numTimes/numDirections
-    return antIdx, dirIdx, timeIdx
+    outAntennas = None
+    outAntennaLabels = None
+    outTimes = None
+    outTimeStamps = None
+    try:
+        d = np.load(patchFile)
+        print("Loading data file: {0}".format(patchFile))
+    except:
+        print("Failed loading data file: {0}".format(patchFile))
+        return
+    #internal data of each patch file (directions set by infoFile)
+    antennas = d['antennas']
+    times = d['times'][timeStart:timeEnd]#gps tai
+    tecData = d['data'][timeStart:timeEnd,:]#times x antennas
+    outTimes_ = []
+    outTimeStamps_ = []
+    outDtec_ = []
+    numTimes = len(times)
+    timeIdx = 0
+    #progress = ProgressBar(numTimes, fmt=ProgressBar.FULL)
+    while timeIdx < numTimes:
+        time = at.Time(times[timeIdx],format='gps',scale='tai')
+        #print("Processing time: {0}".format(time.isot))
+        outTimes_.append(time)
+        outTimeStamps_.append(time.isot)
+        # get direction of patch at time wrt fixed frame
+        outAntennas_ = []
+        outAntennaLabels_ = []
+        antIdx = 0#index in solution table
+        numAnt = len(antennas)
+        while antIdx < numAnt:
+            ant = antennas[antIdx]
+            labelIdx = radioArray.getAntennaIdx(ant)  
+            if labelIdx is None:
+                print("failed to find {}".format(ant))
+            #ITRS WGS84
+            stationLoc = radioArray.locs[labelIdx]
+            outAntennaLabels_.append(ant)
+            outAntennas_.append(stationLoc)
+            outDtec_.append(tecData[timeIdx,antIdx])
+            antIdx += 1
+        #progress(timeIdx)
+        timeIdx += 1
+    #progress.done()
+            
+    if outTimes is None:
+        timeArray = np.zeros(len(outTimes_))
+        j = 0
+        while j < len(outTimes_):
+            timeArray[j] = outTimes_[j].gps
+            j += 1
+        outTimes = at.Time(timeArray,format='gps',scale='tai')
+        outTimeStamps = np.array(outTimeStamps_)
+    if outAntennas is None:
+        antennasArray = np.zeros([len(outAntennas_),3])
+        i = 0
+        while i < len(outAntennas_):
+            antennasArray[i,:] = outAntennas_[i].transform_to('itrs').cartesian.xyz.to(au.km).value
+            i += 1
+        outAntennas = ac.SkyCoord(antennasArray[:,0]*au.km,antennasArray[:,1]*au.km,antennasArray[:,2]*au.km,
+                                 frame = 'itrs')
+        outAntennaLabels = np.array(outAntennaLabels_)
+    return outAntennas, outAntennaLabels, outTimes, outTimeStamps, outDtec_
     
-def forwardEquations(rays,TCI,mu,Kmu,rho,Krho,numTimes,numDirections):
-    '''Perform the forward equation of this model for each ray in rays.
-    ``rays`` is a dict with datumIdx keys
-    ``TCI`` is the tricubic interpolator.
-    return a dictionary of dtec with datumIdx keys
-    if ``rho`` is None then take first antenna tec for each direction for rho'''
+def castRay(origins, directions, neTCI, frequency, tmax, N, straightLineApprox):
+    '''Calculates TEC for all given rays.
+    ``origins`` is a dict with datumIdx keys
+    ``diretions`` is the directions to integrate
+    ``tmax`` is the length of rays to use.
+    ``neTCI`` is the tri cubic interpolator
+    return list of ray trajectories'''
+    from FermatClass import Fermat
+    neTCI.clearCache()
+    fermat = Fermat(neTCI=neTCI,frequency = frequency,type='s',straightLineApprox=straightLineApprox)
+    Nr = origins.shape[0]
+    rays = []
+    r = 0
+    while r < Nr:
+        origin = origins[r,:]
+        direction = directions[r,:]
+        x,y,z,s = fermat.integrateRay(origin,direction,tmax,N=N)
+        rays.append({'x':x,'y':y,'z':z,'s':s})
+        r += 1
+    return rays
+
+#def forwardEquations(rays,TCI,mu,Kmu,rho,Krho,numTimes,numDirections):
+def calculateTEC(origins, directions, neTCI, length):
+    '''Calculates TEC for all given rays.
+    ``origins`` is a dict with datumIdx keys
+    ``diretions`` is the directions to integrate
+    ``length`` is the length of rays to use.
+    ``neTCI`` is the tri cubic interpolator
+    return ordered array of tec'''
     import numpy as np
     from scipy.integrate import simps
-    TCI.m = mu
+    #do all 
     TCI.clearCache()
-    if rho is None:
-        rho = np.zeros(numDirections)
-        setList = []
-    else:
-        setList = np.arange(numDirections)
-    dtec = {}
+    Nr = origins.shape[0]
+    dtec = np.zeros(Nr)
     for datumIdx in rays.keys():
         antIdx, dirIdx, timeIdx = reverseDatumIdx(datumIdx,numTimes,numDirections)
         ray = rays[datumIdx]

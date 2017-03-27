@@ -17,7 +17,7 @@ from astropy.coordinates.baseframe import (BaseCoordinateFrame, FrameAttribute,
 from astropy.coordinates.transformations import FunctionTransform
 from astropy.coordinates.representation import (SphericalRepresentation,
                               UnitSphericalRepresentation,CartesianRepresentation)
-from astropy.coordinates import ITRS,ICRS
+from astropy.coordinates import ITRS,ICRS,AltAz
 
 class CoordinateAttribute(FrameAttribute):
     """
@@ -138,7 +138,7 @@ def itrs_to_uvw(itrs_coo, uvw_frame):
                         itrs_coo.cartesian.x.unit == u.one)
     
     lon, lat, height = uvw_frame.location.to_geodetic('WGS84')
-    lst = ac.AltAz(alt=90*u.deg,az=0*u.deg,location=uvw_frame.location,obstime=uvw_frame.obstime).transform_to(ICRS).ra
+    lst = AltAz(alt=90*u.deg,az=0*u.deg,location=uvw_frame.location,obstime=uvw_frame.obstime).transform_to(ICRS).ra
     ha = (lst - uvw_frame.phase.ra).to(u.radian).value
     dec = uvw_frame.phase.dec.to(u.radian).value
     lonrad = lon.to(u.radian).value - ha
@@ -186,7 +186,7 @@ def uvw_to_itrs(uvw_coo, itrs_frame):
     
     
     lon, lat, height = uvw_coo.location.to_geodetic('WGS84')
-    lst = ac.AltAz(alt=90*u.deg,az=0*u.deg,location=uvw_coo.location,obstime=uvw_coo.obstime).transform_to(ICRS).ra
+    lst = AltAz(alt=90*u.deg,az=0*u.deg,location=uvw_coo.location,obstime=uvw_coo.obstime).transform_to(ICRS).ra
     ha = (lst - uvw_coo.phase.ra).to(u.radian).value
     dec = uvw_coo.phase.dec.to(u.radian).value
     lonrad = lon.to(u.radian).value - ha

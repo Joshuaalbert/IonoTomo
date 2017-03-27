@@ -1,18 +1,17 @@
 
 # coding: utf-8
 
-# In[11]:
+# In[ ]:
 
 import glob
 from RadioArray import RadioArray
-from ENUFrame import ENU
 import numpy as np
 import astropy.units as au
 import astropy.time as at
 import astropy.coordinates as ac
-from Geometry import *
 import dill
 dill.settings['recurse'] = True
+import pp
 
 import os
 
@@ -28,131 +27,148 @@ def getDatum(datumIdx,numAnt,numTimes):
     return antIdx,timeIdx,dirIdx
 
 class DataPack(object):
+    '''dataDict = {'radioArray':radioArray,'antennas':outAntennas,'antennaLabels':outAntennaLabels,
+                    'times':outTimes,'timeStamps':outTimeStamps,
+                    'directions':outDirections,'patchNames':outPatchNames,'dtec':outDtec}
+    '''
     def __init__(self,dataDict):
         '''get the astropy object defining rays and then also the dtec data'''
-        self.antennas = dataDict['antennas']#a dictionary {antIdx:label,...}
-        self.numAnt = len(self.antennas)
-        self.times = dataDict['times']#a dictionary {timeIdx:time,...}
-        self.numTimes = len(self.times)
-        self.directions = dataDict['directions']#a dictionary {dirIdx:icrs}
-        self.numDir = len(self.directions)
-        self.dtec = dataDict['dtec'] #a dictionary {datumIdx: data}
-        self.radioArray = dataDict['radioArray'] #radioArray containing antenna information
+        self.addDataDict(**dataDict)
+        self.Na = len(self.antennas)
+        self.Nt = len(self.times)
+        self.Nd = len(self.directions)
+        print("Loaded {0} antennas, {1} times, {2} directions".format(self.Na,self.Nt,self.Nd))
+    
+    def addDataDict(self,**args):
+        '''Set up variables here that will hold references throughout'''
+        for attr in args.keys():
+            try:
+                setattr(self,attr,args[attr])
+            except:
+                print("Failed to set {0} to {1}".format(attr,args[attr]))
 
-    def get_dtec_array(self,antIdx=[],timeIdx=[], dirIdx=[]):
-        '''Retrieve the specified dtec solutions'''
+    def get_dtec(self,antIdx=[],timeIdx=[], dirIdx=[]):
+        '''Retrieve the specified dtec solutions corresponding to the requested indices.
+        value of -1 means all.'''
         if antIdx is -1:
-            antIdx = self.antennas.keys()
+            antIdx = np.arange(self.Na)
         if timeIdx is -1:
-            timeIdx = self.times.keys()
+            timeIdx = np.arange(self.Nt)
         if dirIdx is -1:
-            dirIdx = self.directions.keys()
-        #make output
-        output = np.zeros([len(antIdx),len(timeIdx),len(dirIdx)],dtype=np.double)
-        #grab data
+            dirIdx = np.arange(self.Nd)
+        antIdx = np.sort(antIdx)
+        timeIdx = np.sort(timeIdx)
+        dirIdx = np.sort(dirIdx)
+        Na = len(antIdx)
+        Nt = len(timeIdx)
+        Nd = len(dirIdx)
+        output = np.zeros([Na,Nt,Nd],dtype=np.double)
         i = 0
-        while i < len(antIdx):
+        while i < Na:
             j = 0
-            while j < len(timeIdx):
+            while j < Nt:
                 k = 0
-                while k < len(dirIdx):
-                    datumIdx = getDatumIdx(antIdx[i],timeIdx[j],dirIdx[k],self.numAnt,self.numTimes)
-                    if datumIdx in self.dtec.keys():
-                        output[i,j,k] = self.dtec[datumIdx]
-                    else:
-                        print('{0} not a valid datumidx'.format(datumIdx))
-                        output[i,j,k] = np.nan
+                while k < Nd:
+                    output[i,j,k] = self.dtec[antIdx[i],timeIdx[j],dirIdx[k]]
                     k += 1
                 j += 1
             i += 1
         return output
     
-    def get_antennas_array(self,antIdx=[]):
-        '''Get the array of antenna locations'''
+    def get_antennas(self,antIdx=[]):
+        '''Get the list of antenna locations in itrs'''
         if antIdx is -1:
-            antIdx = self.antennas.keys()
-        output = np.zeros([len(antIdx),3],dtype=np.double)
-        locs = self.radioArray.locs.cartesian.xyz.to(au.km).value.transpose()
+            antIdx = np.arange(self.Na)
+        antIdx = np.sort(antIdx)
+        output = self.antennas[antIdx]
+        Na = len(antIdx)
+        outputLabels = []
         i = 0
-        while i < len(antIdx):
-            idx = self.radioArray.getAntennaIdx(self.antennas[antIdx[i]])
-            loc = locs[idx,:]
+        while i < Na:
+            outputLabels.append(self.antennaLabels[antIdx[i]])
             i += 1
-        return output
+        return output, outputLabels
     
-    def get_times_array(self,timeIdx=[]):
+    def get_times(self,timeIdx=[]):
         '''Get the gps times'''
         if timeIdx is -1:
-            timeIdx = self.times.keys()
-        output = np.zeros(len(timeIdx),dtype=np.double)
-        i = 0
-        while i < len(timeIdx):
-            if timeIdx[i] in self.times.keys():
-                output[i,:] = self.times[timeIdx[i]].gps
-            else:
-                output[i,:] = np.nan
-            i += 1
-        return output
-    
-    def get_rays(self,antIdx=[],timeIdx=[], dirIdx=[]):
-        '''Retrieve the specified rays, R^ijk'''
-        if antIdx is -1:
-            antIdx = self.antennas.keys()
-        if timeIdx is -1:
-            timeIdx = self.times.keys()
-        if dirIdx is -1:
-            dirIdx = self.directions.keys()
-        rays = {}
+            timeIdx = np.arange(self.Nt)
+        timeIdx = np.sort(timeIdx)
+        output = self.times[timeIdx]
+        Nt = len(timeIdx)
+        outputLabels = []
         j = 0
-        while j < len(timeIdx):
-            enu = ENU(location=self.radioArray.getCenter().earth_location,obstime=self.times[timeIdx[j]])
-            i = 0
-            while i < len(antIdx):
-                idx = self.radioArray.getAntennaIdx(self.antennas[antIdx[i]])
-                origin = self.radioArray.locs[idx].transform_to(enu).cartesian.xyz.to(au.km).value
-                k = 0
-                while k < len(dirIdx):
-                    dir = self.directions[dirIdx[k]].transform_to(enu).cartesian.xyz.value
-                    datumIdx = getDatumIdx(antIdx[i],timeIdx[j],dirIdx[k],self.numAnt,self.numTimes)
-                    if datumIdx in self.dtec.keys():
-                        output[i,j,k] = self.dtec[datumIdx]
-                    else:
-                        print('{0} not a valid datumidx'.format(datumIdx))
-                        output[i,j,k] = np.nan
-                    k += 1
-                i += 1
+        while j < Nt:
+            outputLabels.append(self.timeStamps[timeIdx[j]])
             j += 1
-        return output
+        return output, outputLabels
     
-    def get_directions_array(self, timeIdx=[], dirIdx=[]):
+    def get_directions(self, dirIdx=[]):
         '''Get the array of directions in itrs'''
-        if timeIdx is -1:
-            timeIdx = self.times.keys()
         if dirIdx is -1:
-            dirIdx = self.directions.keys()
-        #output = np.zeros([len(dirIdx),3],dtype=np.double)
-        output = np.zeros([len(timeIdx)*len(dirIdx),3],dtype=np.double)
-        #grab data
-        
-        j = 0
-        while j < len(timeIdx):
-            enu = ENU(location = radioArray.getCenter().location,obstime=self.times[timeIdx[j]])
-            k = 0
-            while k < len(dirIdx):
-                output[j,k,:] = self.directions[dirIdx[k]].transform_to(enu).cartesian.xyz.to(au.km).value
-                k += 1
-            j += 1
-        return output
+            dirIdx = np.arange(self.Nd)
+        dirIdx = np.sort(dirIdx)
+        output = self.directions[dirIdx]
+        Nd = len(dirIdx)
+        outputLabels = []
+        k = 0
+        while k < Nd:
+            outputLabels.append(self.patchNames[dirIdx[k]])
+            k += 1
+        return output, outputLabels
     
+    def setReferenceAntenna(self,refAnt):
+        refAntIdx = None
+        i = 0
+        while i < self.Na:
+            if self.antennaLabels[i] == refAnt:
+                refAntIdx = i
+                break
+            i += 1
+            
+        assert refAntIdx is not None, "{} is not a valid antenna. Choose from {}".format(refAnt,self.antennaLabels)
+        self.dtec -= self.dtec[refAntIdx,:,:]
+        
+    def flagAntennas(self,antennaLabels):
+        '''remove data corresponding to the given antenna names if it exists'''
+        assert type(antennaLabels) == type([]), "{} is not a list of station names. Choose from {}".format(antennaLabels,self.antennaLabels)
+        mask = np.ones(len(self.antennaLabels), dtype=bool)
+        antennasFound = 0
+        i = 0
+        while i < self.Na:
+            if self.antennaLabels[i] in antennaLabels:
+                antennasFound += 1
+                mask[i] = False
+            i += 1
+        #some flags may have not existed in data
+        Na = self.Na - antennasFound
+        dtec = np.zeros([Na,self.Nt,self.Nd],dtype=np.double)
+        skip = 0
+        i = 0
+        while i < self.Na:
+            if self.antennaLabels[i-skip] in antennaLabels:
+                skip += 1
+            else:
+                dtec[i,:,:] = self.dtec[i+skip,:,:]
+            i += 1
+        self.antennaLabels = self.antennaLabels[mask]
+        self.antennas = self.antennas[mask]
+        self.dtec = dtec
+        self.Na = len(self.antennas)
+        
 def PrepareData(infoFile,dataFolder,timeStart = 0, timeEnd = -1,arrayFile='arrays/lofar.hba.antenna.cfg',
-                load=False,dataFilePrefix='inversion_dTEC'):
+                load=False,dataFilePrefix='inversion_dTEC',numThreads=6):
     '''Grab real data from soltions products. 
     Stores in a DataPack object.'''
+    
+    def ppFetchPatch(patchFile,timeStart,timeEnd,radioArray):
+        outAntennas, outAntennaLabels, outTimes, outTimeStamps, outDtec_ = ParallelInversionProducts.fetchPatch(patchFile,timeStart,timeEnd,radioArray)
+        return outAntennas, outAntennaLabels, outTimes, outTimeStamps, outDtec_
     
     assert os.path.isdir(dataFolder), "{0} is not a directory".format(dataFolder)
     dataFile = "{0}/{1}.dill".format(dataFolder,dataFilePrefix)
     print("Checking for existing preprocessed data.")
-    if os.path.isfile(dataFile):
+    if os.path.isfile(dataFile) and load:
         #try to load
         try:
             f = open(dataFile,'rb')
@@ -166,39 +182,36 @@ def PrepareData(infoFile,dataFolder,timeStart = 0, timeEnd = -1,arrayFile='array
     else:
         generate = True
     if generate:
+        jobs = {}
+        print("Creating jobs server")
+        job_server = pp.Server(numThreads, ppservers=())
+        
         print("Generating data using solutions in {0}".format(dataFolder))
         print("Using radio array file: {}".format(arrayFile))
-        radioArray = RadioArray(arrayFile,frequency=150e6)#set frequency from solutions too
+        #get array stations (they must be in the array file to be considered for data packaging)
+        radioArray = RadioArray(arrayFile,frequency=150e6)#set frequency from solutions todo
         #get patch names and directions for dataset
         info = np.load(infoFile)
         #these define the direction order
-        patches = info['patches']
-        numPatches = len(patches)
+        patches = info['patches']#names
         radec = info['directions']
-        print("Loaded {0} directions".format(numPatches))
-        
-        #get array stations (they must be in the array file to be considered for data packaging)
-        radioArray = RadioArray(arrayFile)
-        stationLabels = radioArray.labels
-        stationLocs = radioArray.locs.cartesian.xyz.transpose()
-        numStations = radioArray.Nantennas
-        print("Number of stations in array: {0}".format(numStations))
-
-        #each time gives a different direction for each patch
-        #numDirs = numTimes * numPatches #maybe a file doesn't load
-        
-        outAntennas = {}
-        outTimes = {}
-        outDirections = {}
-        outDtec = {}
-        
-        patchIdx = 0
+        outAntennas = None
+        outAntennaLabels = None
+        outTimes = None
+        outTimeStamps = None
+        outDirections = None
+        outPatchNames = None
+        outDirections_ = []
+        outPatchNames_ = []
+        outDtec_ = []#will be processed to a NaxNtxNd array
         failed = 0
+        numPatches = len(patches)
+        print("Loaded {0} patches".format(numPatches))
+        patchIdx = 0
         while patchIdx < numPatches:
             patch = patches[patchIdx]
             rd = radec[patchIdx]
             dir = ac.SkyCoord(rd.ra,rd.dec,frame='icrs')
-            
             #find the appropriate file (this will be standardized later)
             files = glob.glob("{0}/*_{1}_*.npz".format(dataFolder,patch))
             if len(files) == 1:
@@ -207,47 +220,50 @@ def PrepareData(infoFile,dataFolder,timeStart = 0, timeEnd = -1,arrayFile='array
                 print('Too many files found. Could not find patch: {0}'.format(patch))
                 patchIdx += 1
                 continue
-            print("Loading data file: {0}".format(file))
-            try:
-                d = np.load(file)
-            except:
-                print("Failed loading data file: {0}".format(file))
-                failed += 1
-                patchIdx += 1
-                continue
-            #internal data of each patch file (directions set by infoFile)
-            antennas = d['antennas']
-            times = d['times'][timeStart:timeEnd]#gps tai
-            numTimes = len(times)
-            tecData = d['data'][timeStart:timeEnd,:]#times x antennas
-            timeIdx = 0
-            while timeIdx < numTimes:
-
-                time = at.Time(times[timeIdx],format='gps',scale='tai')
-                print("Processing time: {0}".format(time.isot))
-                
-                # get direction of patch at time wrt fixed frame
-                
-                antIdx = 0#index in solution table
-                numAnt = len(antennas)
-                while antIdx < len(antennas):
-                    ant = antennas[antIdx]
-                    labelIdx = radioArray.getAntennaIdx(ant)
-                    if labelIdx is None:
-                        print("failed to find {}".format(ant))
-                    datumIdx = getDatumIdx(antIdx,timeIdx,patchIdx,numAnt,numTimes)
-                    
-                    #ITRS WGS84
-                    stationLoc = ac.SkyCoord(*stationLocs[labelIdx,:],obstime=time,frame='itrs')
-                    outAntennas[antIdx] = ant
-                    outTimes[timeIdx] = time
-                    outDirections[patchIdx] = dir
-                    outDtec[datumIdx] = tecData[timeIdx,antIdx]
-                    
-                    antIdx += 1
-                timeIdx += 1
+            outPatchNames_.append(patch)
+            outDirections_.append(dir)
+            
+            job = job_server.submit(ppFetchPatch,
+                       args=(file,timeStart,timeEnd,radioArray),
+                       depfuncs=(),
+                       modules=('ParallelInversionProducts',))
+            jobs[patchIdx] = job
             patchIdx += 1
-        dataDict = {'radioArray':radioArray,'antennas':outAntennas,'times':outTimes,'directions':outDirections,'dtec':outDtec}
+        #Get job results
+        patchIdx = 0
+        while patchIdx < numPatches:
+            outAntennas, outAntennaLabels, outTimes, outTimeStamps, outDtec_job = jobs[patchIdx]()
+            outDtec_ += outDtec_job
+            patchIdx += 1
+        job_server.print_stats()
+        job_server.destroy()
+        dirArray = np.zeros([len(outDirections_),2])
+        k = 0
+        while k < len(outDirections_):
+            dirArray[k,0] = outDirections_[k].ra.deg
+            dirArray[k,1] = outDirections_[k].dec.deg
+            k += 1
+        outDirections = ac.SkyCoord(dirArray[:,0]*au.deg,dirArray[:,1]*au.deg,frame='icrs')
+        outPatchNames = np.array(outPatchNames_)
+        Na = len(outAntennas)
+        Nt = len(outTimes)
+        Nd = len(outDirections)
+        outDtec = np.zeros([Na,Nt,Nd],dtype=np.double)
+        count = 0
+        k = 0
+        while k < Nd:
+            j = 0
+            while j < Nt:
+                i = 0
+                while i < Na:
+                    outDtec[i,j,k] = outDtec_[count]
+                    count += 1
+                    i += 1
+                j += 1
+            k += 1
+        dataDict = {'radioArray':radioArray,'antennas':outAntennas,'antennaLabels':outAntennaLabels,
+                    'times':outTimes,'timeStamps':outTimeStamps,
+                    'directions':outDirections,'patchNames':outPatchNames,'dtec':outDtec}
         f = open(dataFile,'wb')
         dill.dump(dataDict,f)
         f.close()
@@ -255,46 +271,47 @@ def PrepareData(infoFile,dataFolder,timeStart = 0, timeEnd = -1,arrayFile='array
     
 def plotDataPack(dataPack):
     import pylab as plt
-    directions = dataPack.get_directions_array(timeIdx=-1, dirIdx=-1)
-    #Nt = directions.shape[0]
-    #Nd = directions.shape[1]
-    dtec = dataPack.dtec
-    antennas = dataPack.get_antennas_array(antIdx=-1)
-    Nant = antannas.shape[0]
-    plotperaxis = int(np.ceil(np.sqrt(Nant)))
-    dtec -= np.min(dtec)
-    dtec /= np.max(dtec)
+    dtec = dataPack.get_dtec(antIdx = [0],dirIdx=-1,timeIdx=np.arange(6))
+    directions, patchNames = dataPack.get_directions(dirIdx=-1)
+    antennas, antLabels = dataPack.get_antennas(antIdx=[0])
+    times,timestamps = dataPack.get_times(timeIdx=np.arange(6))
+    Na = len(antennas)
+    Nt = len(times)
+    Nd = len(directions)
+    #use direction average as phase tracking direction
+    from UVWFrame import UVW
+    from ENUFrame import ENU
+    raMean = np.mean(directions.transform_to('icrs').ra)
+    decMean = np.mean(directions.transform_to('icrs').dec)
+    phase = ac.SkyCoord(raMean,decMean,frame='icrs')
+    loc = dataPack.radioArray.getCenter().earth_location
     f = plt.figure()
-    print(ax)
-    i = 0
-    while i < Nant:
-        ax = plt.subplot(plotperaxis,plotperaxis,i+1)
-        for datumIdx in dtec.keys():
-            antIdx,dirIdx,timeIdx = getDatum(datumIdx,numDirections,numTimes)
-            if antIdx==i:
-                dir = directions[timeIdx,dirIdx]
-                ax.scatter(dir[0],dir[1],c=dtec[datumIdx],s=(data*50)**2,vmin=0.25,vmax=0.5)
-        i += 1
+    ax1 = plt.subplot(121)
+    ax2 = plt.subplot(122)
+    j = 0
+    while j < Nt:
+        time = times[j]
+        uvw = UVW(location=loc,obstime=time,phase = phase)
+        enu = ENU(location=loc,obstime=time)
+        dirs_uvw = directions.transform_to(uvw)
+        dirs_enu = directions.transform_to(enu)
+        factor300 = 300./dirs_uvw.w.value
+        sc1 = ax1.scatter(dirs_uvw.u.value*factor300,dirs_uvw.v.value*factor300, c=dtec[0,j,:],
+                        vmin=np.min(dtec),vmax=np.max(dtec),s=(100*dtec[0,j,:])**2,alpha=0.2)
+        sc2 = ax2.scatter(dirs_enu.east.value*factor300,dirs_enu.north.value*factor300, c=dtec[0,j,:],
+                        vmin=np.min(dtec),vmax=np.max(dtec),s=(100*dtec[0,j,:])**2,alpha=0.2)
+        j += 1
+    plt.colorbar(sc1)
     plt.show()
 
 if __name__ == '__main__':
     dataPack = PrepareData(infoFile='SB120-129/WendysBootes.npz',
                            dataFolder='SB120-129/',
-                           timeStart = 1, timeEnd = 1,
-                           arrayFile='arrays/lofar.hba.antenna.cfg',load=True)
+                           timeStart = 0, timeEnd = 10,
+                           arrayFile='arrays/lofar.hba.antenna.cfg',load=False,numThreads=4)
+    dataPack.flagAntennas(['CS007HBA1','CS007HBA0','CS013HBA0','CS013HBA1'])
+    dataPack.setReferenceAntenna('CS501HBA1')
     plotDataPack(dataPack)
-   
-        
-
-
-# In[1]:
-
-import os
-
-
-# In[3]:
-
-help(os.path.isfile)
 
 
 # In[ ]:
