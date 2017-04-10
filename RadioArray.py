@@ -7,6 +7,7 @@ import astropy.coordinates as ac
 import astropy.units as au
 import astropy.time as at
 import numpy as np
+import sys
 
 class RadioArray(object):
     '''Handles the radio array object.'''
@@ -21,12 +22,13 @@ class RadioArray(object):
             
     def loadArrayFile(self,arrayFile):
         '''Loads a csv where each row is x,y,z in geocentric ITRS coords of the antennas'''
+        
         try:
             types = np.dtype({'names':['X','Y','Z','diameter','station_label'],
                              'formats':[np.double,np.double,np.double,np.double,'S16']})
             d = np.genfromtxt(arrayFile,comments = '#',dtype=types)
             self.diameters = d['diameter']
-            self.labels = d['station_label']
+            self.labels = d['station_label'].astype(str)
             self.locs = ac.SkyCoord(x=d['X']*au.m,y=d['Y']*au.m,z=d['Z']*au.m,frame='itrs')
             self.Nantenna = int(np.size(d['X']))
         except:
@@ -93,28 +95,19 @@ class RadioArray(object):
                 return i
             i += 1
         return None
+    
+    def getSunZenithAngle(self,time):
+        '''Return the solar zenith angle in degrees at the given time.'''
+        frame = ac.AltAz(location=self.getCenter().earth_location,obstime=time)
+        sun = ac.get_sun(time).transform_to(frame)
+        return 90. - sun.alt.deg
+    
+    def __repr__(self):
+        return "Radio Array: {0:1.5e} MHz, Longitude {1:.2f} Latitude {2:.2f} Height {3:.2f}".format(self.frequency,*self.getCenter().earth_location.to_geodetic('WGS84'))
 
 if __name__=='__main__':
     #from Logger import Logger
     #logger = Logger()
-    radioArray = RadioArray(arrayFile='arrays/gmrtPos.csv')
-    print(radioArray.getCenter().earth_location.geodetic)
-    print(radioArray.getCenter())
     radioArray = RadioArray(arrayFile='arrays/lofar.hba.antenna.cfg')
-    print(radioArray.getCenter().earth_location.geodetic)
-    print('WGS84',radioArray.center.earth_location.to_geodetic('WGS84'))
-    print('WGS84',radioArray.center.earth_location.geodetic[1].deg)
-    from ENUFrame import ENU
-    enu = ENU(obstime=at.Time(0,format='gps'),location=radioArray.getCenter().earth_location)
-    aa = ac.AltAz(obstime=at.Time(0,format='gps'),location=radioArray.getCenter().earth_location)
-    print(ac.SkyCoord(alt=90*au.deg,az=0*au.deg,frame=aa).transform_to('icrs'))
-    print(ac.SkyCoord(alt=90*au.deg,az=0*au.deg,frame=aa).transform_to(enu).transform_to('icrs'))
-    print(ac.SkyCoord(east=0,north=0,up=1,frame=enu).transform_to('icrs').dec)
-    radioArray.saveArrayFile('arrays/testarray.csv')
-    print(radioArray.center.earth_location)
-    #print radioArray.center.earth_location.height
-    #times = at.Time([0,2,4]*au.s,format='gps',scale='utc')
-    #radioArray.calcBaselines(times,np.array([12,62]))
-    #v = radioArray.baselines[0,:,:,1]
-    #testBaselines()
+    print(radioArray.labels)
 

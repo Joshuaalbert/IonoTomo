@@ -32,7 +32,7 @@ def plotWavefront(neTCI,rays,save=False,saveFile=None,animate=False):
     #l = mlab.pipeline.volume(mlab.pipeline.scalar_field(X,Y,Z,data))#,vmin=min, vmax=min + .5*(max-min))
     #l._volume_property.scalar_opacity_unit_distance = min((xmax-xmin)/4.,(ymax-ymin)/4.,(zmax-zmin)/4.)
     #l._volume_property.shade = False
-    mlab.contour3d(X,Y,Z,data,contours=5,opacity=0.2)
+    mlab.contour3d(X,Y,Z,data,contours=10,opacity=0.2)
     mlab.colorbar()
     
     def getWave(rays,idx):
@@ -48,7 +48,7 @@ def plotWavefront(neTCI,rays,save=False,saveFile=None,animate=False):
         return xs,ys,zs
     
     if rays is not None:
-        for datumIdx in rays.keys():
+        for datumIdx in range(len(rays)):
             ray = rays[datumIdx]
             mlab.plot3d(ray["x"],ray["y"],ray["z"],tube_radius=0.75)
         if animate:
@@ -128,19 +128,4 @@ if __name__ == '__main__':
     files = glob.glob("results/model-*.npz")
     animateResults(files)
     
-
-
-# In[1]:
-
-from mayavi import mlab
-
-
-# In[10]:
-
-help(mlab.clf)
-
-
-# In[ ]:
-
-
 

@@ -4,6 +4,7 @@
 # In[ ]:
 
 import numpy as np
+from scipy.integrate import odeint
 from TricubicInterpolation import TriCubic
 
 class Fermat(object):
@@ -175,7 +176,7 @@ class Fermat(object):
         #px,py,pz,x,y,z,s
         init = [px0,py0,pz0,x0,y0,z0,0]
         if self.type == 'z':
-            tarray = np.linspace(z0,z0+tmax,N)
+            tarray = np.linspace(z0,tmax,N)
         if self.type == 's':
             tarray = np.linspace(0,tmax,N)
         Y,info =  odeint(self.eulerODE, init, tarray,Dfun = self.jacODE, col_deriv = True, full_output=1)

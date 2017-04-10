@@ -1,6 +1,11 @@
 
 # coding: utf-8
 
+# In[6]:
+
+
+
+
 # In[ ]:
 
 '''Based on the paper doi=10.1.1.89.7835
@@ -10,9 +15,10 @@ calulations. Here we formulate the full tricubic interpolation where the value o
 grid can be reconstructed to allow full C1, and thus langrangian structures to persist.'''
 
 import numpy as np
+import h5py
 
 class TriCubic(object):
-    def __init__(self,xvec,yvec,zvec,M,useCache = True,default=None,xUniform=True,yUniform=True,zUniform = True,pad=False):
+    def __init__(self,xvec=None,yvec=None,zvec=None,M=None,useCache = True,default=None, filename=None):
         '''Object that handles tri cubic interpolation. In general use the following parameters:
         ``xvec`` - the xaxis (regular)
         ``yvec`` - the yaxis (regular)
@@ -23,11 +29,9 @@ class TriCubic(object):
         ``default`` - when point falls out of domain specified by xvec,yvec, zvec what value to return,
                     None (default) means nearest.
         ``pad`` - whether to pad array (experimental: leave False)'''
-        if pad:
-            #pad xyz vecs
-            xvec = self.padVec(xvec)
-            yvec = self.padVec(yvec)
-            zvec = self.padVec(zvec)
+        if filename is not None:
+            self.load(filename,useCache=useCache,default=default)
+            return
         self.default = default
         self.nx = np.size(xvec)
         self.ny = np.size(yvec)
@@ -35,20 +39,7 @@ class TriCubic(object):
         self.xvec = xvec.ravel(order='C')
         self.yvec = yvec.ravel(order='C')
         self.zvec = zvec.ravel(order='C')
-        #determine uniformity
-        dx = self.xvec[1:] - self.xvec[:-1]
-        self.dx = np.mean(dx)
-        self.xUniform = xUniform
-        dy = self.yvec[1:] - self.yvec[:-1]
-        self.dy = np.mean(dy)
-        self.yUniform = yUniform    
-        dz = self.zvec[1:] - self.zvec[:-1]
-        self.dz = np.mean(dz)
-        self.zUniform = zUniform
-        if pad:
-            self.m = self.padArray(M).ravel(order='C')
-        else:
-            self.m = M.ravel(order='C')
+        self.m = M.ravel(order='C')
         self.setBinv()
         self.checkIndexing(M)
         self.useCache = useCache
@@ -57,35 +48,32 @@ class TriCubic(object):
         else:
             self.cache = None
         #print(self.iPowers,self.jPowers,self.kPowers)
-    def padVec(self,vec,padding=2):
-        size = np.size(vec)
-        dx = np.mean(vec[:-1] - vec[1:])
-        vec = np.linspace(vec[0] - padding*dx, vec[-1] + padding*dx,size +2*padding)
-        return padded
-        
-    def padArray(self,M,padding=2):
-        '''Pad 3d-array with copys of self ``padding`` elements on each axis'''
-        shape = M.shape
-        padded = np.zeros([shape[0]+2*padding,shape[1]+2*padding,shape[2]+2*padding])
-        padded[:padding,padding:padding+shape[1],padding:padding+shape[2]] += M[0,:,:]
-        padded[-padding:,padding:padding+shape[1],padding:padding+shape[2]] += M[-1,:,:]
-        
-        padded[:shape[0],:shape[1],2*padding:] += M
-        padded[:shape[0],2*padding:,:shape[2]] += M
-        padded[:shape[0],2*padding:,2*padding:] += M
-        padded[2*padding:,:shape[1],:shape[2]] += M
-        padded[2*padding:,shape[1]:,2*padding:] += M
-        padded[2*padding:,2*padding:,:shape[2]] += M
-        padded[2*padding:,2*padding:,2*padding:] += M
-        padded /= 8.
-        padded[padding:padding+shape[0],padding:padding+shape[1],padding:padding+shape[2]] = M
-        return padded
     
     def copy(self,**kwargs):
         '''Return a copy of the TriCubic object by essentially creating a copy of all the data. 
         ``kwargs`` are the same as constructor.'''
         return TriCubic(self.xvec.copy(),self.yvec.copy(),self.zvec.copy(),self.getShapedArray().copy(),**kwargs)
-    
+    def load(self,filename,**kwargs):
+        f = h5py.File(filename,'r')
+        xvec = f["TCI/xvec"][:]
+        yvec = f["TCI/yvec"][:]
+        zvec = f["TCI/zvec"][:]
+        M = f["TCI/M"][:,:,:]
+        self.__init__(xvec,yvec,zvec,M,**kwargs)
+        f.close()
+    #@jit
+    def save(self,filename):
+        dt = h5py.special_dtype(vlen=str)
+        f = h5py.File(filename,'w')
+        xvec = f.create_dataset("TCI/xvec",(self.nx,),dtype=np.double)
+        yvec = f.create_dataset("TCI/yvec",(self.ny,),dtype=np.double)
+        zvec = f.create_dataset("TCI/zvec",(self.nz,),dtype=np.double)
+        M = f.create_dataset("TCI/M",(self.nx,self.ny,self.nz),dtype=np.double)
+        xvec[...] = self.xvec
+        yvec[...] = self.yvec
+        zvec[...] = self.zvec
+        M[...] = self.getShapedArray()
+        f.close()
     def clearCache(self):
         '''Clear the cache, which should be done if overwriting the array'''
         self.cache = {}
@@ -94,6 +82,7 @@ class TriCubic(object):
         '''Given an ``array`` , and given a ``value`` , returns an index j such that ``value`` is between array[j]
         and array[j+1]. ``array`` must be monotonic increasing. j=-1 or j=len(array) is returned
         to indicate that ``value`` is out of range below and above respectively.'''
+        #return bisection(array,value)
         n = len(array)
         if (value < array[0]):
             return -1
@@ -120,22 +109,11 @@ class TriCubic(object):
     
     def getInterpIndex(self,x,y,z):
         '''vectorized find closest cell rounding down always'''
-        N = np.size(x)
-        if N == 1:
-            xi = self.bisection(self.xvec,x)
-            yi = self.bisection(self.yvec,y)
-            zi = self.bisection(self.zvec,z)
-            return xi,yi,zi
-        xi = np.atleast_1d(np.zeros(N))
-        yi = np.atleast_1d(np.zeros(N))
-        zi = np.atleast_1d(np.zeros(N))
-        i = 0
-        while i < np.size(x):
-            xi[i] = self.bisection(self.xvec,x[i])
-            yi[i] = self.bisection(self.yvec,y[i])
-            zi[i] = self.bisection(self.zvec,z[i])
-            i += 1
+        xi = self.bisection(self.xvec,x)
+        yi = self.bisection(self.yvec,y)
+        zi = self.bisection(self.zvec,z)
         return xi,yi,zi
+
     
     def index(self,i,j,k):
         '''Correct indexing of 3-tensor in ravelled vector, vectorized'''
@@ -143,7 +121,7 @@ class TriCubic(object):
         
     def getShapedArray(self):
         '''Return the model in 3d array with proper ij ordering'''
-        return self.m.reshape(self.nx,self.ny,self.nz)
+        return self.m.reshape(self.nx,self.ny,self.nz,order='C')
     def getModelCoordinates(self):
         X,Y,Z = np.meshgrid(self.xvec,self.yvec,self.zvec,indexing='ij')
         return X.ravel(order='C'),Y.ravel(order='C'),Z.ravel(order='C')
@@ -1357,11 +1335,39 @@ def testResult():
         print("fyz:",(fyz(x,y,z) - fyz_)/fyz(x,y,z))
         print("fxyz:",(fxyz(x,y,z) - fxyz_)/fxyz(x,y,z))
         
+def timeTest(N=100):
+    from time import clock
+    xvec = np.arange(500)
+    yvec = np.arange(400)
+    zvec = np.arange(300)
+    M = np.random.uniform(size=[500,400,300])
+    tci = TriCubic(xvec,yvec,zvec,M)
+    x = np.random.uniform(size=N)*500
+    y = np.random.uniform(size=N)*400
+    z = np.random.uniform(size=N)*300
+    startTime = clock()
+    for i in xrange(N):
+        y2 = tci.interp(x[i],y[i],z[i])
+        #assert np.abs(y1 - y2) < 1e-10, "TCI's not equivalent good: {}, new: {}".format(y1,y2)
+    print("Time per call: {} seconds".format((clock() - startTime)/float(N)))
+    
+def saveTest():
+    xvec = np.arange(500)
+    yvec = np.arange(400)
+    zvec = np.arange(300)
+    M = np.random.uniform(size=[500,400,300])
+    tci = TriCubic(xvec,yvec,zvec,M)
+    tci.save("testest.npy")
+    tci2 = TriCubic(filename="testest.npy")
+    assert np.alltrue(tci.m==tci2.m), "m is not equal"
     
     
 if __name__=='__main__':
     np.random.seed(1234)
     #generateBinv()
     #optimizeBvecFormation()
-    testResult()
+    #testResult()
+    #timeTest(N=10000)
+    saveTest()
+
 

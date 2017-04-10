@@ -78,9 +78,9 @@ class ENU(BaseCoordinateFrame):
     @property
     def elevation(self):
         """
-        Elevation above the horizon of the direction, in radians
+        Elevation above the horizon of the direction, in degrees
         """
-        return np.arctan2(self.up,np.sqrt(self.north**2 + self.east**2))
+        return np.arctan2(self.up,np.sqrt(self.north**2 + self.east**2))*180./np.pi
 
 @frame_transform_graph.transform(FunctionTransform, ITRS, ENU)
 def itrs_to_enu(itrs_coo, enu_frame):

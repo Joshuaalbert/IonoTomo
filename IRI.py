@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[4]:
+# In[5]:
 
 import numpy as np
 from sympy import Rational,symbols,exp,lambdify,sqrt,tanh,log,pi
@@ -254,6 +254,47 @@ def R2upperbound(frequency=100e6,cond=0):
     print("freq:",frequency,"cond:",cond,"alphahat:{0:1.1e}".format(np.mean(alpha)),"sigma_alpha^2:{0:1.1e}".format(np.mean(alpha**2)-np.mean(alpha)**2))
     return "{0:1.1e}".format(simps(integrand,h)*n_p/8./1e16)
 
+def aPrioriModel(h,zenith):
+    '''Return a stratified reference ionosphere based on fitted data depending on zenith angle of the sun in degrees'''
+    def peakDensity(n0,dn,tau,b,zenith):
+        y = zenith/tau
+        return n0 + dn*np.exp(-y**2)/(1. + y**(2*b))
+    def peakHeight(z0,dz,rho,chi0,zenith):
+        return z0 + dz/(1.+np.exp(-(zenith - chi0)/rho))
+    def layerDensity(nm,zm,H,z):
+        y = (z - zm)/H
+        return nm*np.exp(1./2. * (1. - y - np.exp(-y)))
+        
+    #D layer
+    #nm_d = peakDensity(4e8,5.9e8,58.,1300.,zenith)
+    y = zenith/58.
+    if y < 1:
+        nm_d = 4e8 + 5.9e8*np.exp(-y**2)
+    else:
+        nm_d = 4e8
+    zm_d = peakHeight(81.,7.,7.46,100.,zenith)
+    H_d = 8.
+    n_d = layerDensity(nm_d,zm_d,H_d,h)
+    #E layer
+    nm_e = peakDensity(1.6e9,1.6e11,87.,8.7,zenith)
+    zm_e = 110.
+    H_e = 11.
+    n_e = layerDensity(nm_e,zm_e,H_e,h)
+    #F1 layer
+    nm_f1 = peakDensity(2.0e11,9.1e10,54.,13.6,zenith)
+    zm_f1 = 185.
+    H_f1 = 40.
+    n_f1 = layerDensity(nm_f1,zm_f1,H_f1,h)
+    #F2 layer
+    nm_f2 = peakDensity(7.7e10,4.4e11,111.,4.8,zenith)
+    zm_f2 = peakHeight(242.,75.,7.46,96.,zenith)
+    H_f2 = 55.
+    n_f2 = layerDensity(nm_f2,zm_f2,H_f2,h)
+
+    n = np.atleast_1d(n_d + n_e + n_f1 + n_f2)
+    return n
+        
+
 def fitExampleIonospheres(folder):
     import glob
     files = glob.glob("{0}/*".format(folder))
@@ -419,26 +460,17 @@ def fitExampleIonospheres(folder):
     plt.show()
     
 if __name__=='__main__':
-    fitExampleIonospheres("IriData")
+    h = np.linspace(0,2000,1000)
+    import pylab as plt
+    plt.plot(h,aPrioriModel(h,0))
+    plt.plot(h,aPrioriModel(h,20))
+    plt.plot(h,aPrioriModel(h,45))
+    plt.plot(h,aPrioriModel(h,90))
+    plt.show()
+    #fitExampleIonospheres("IriData")
     #print( IntegrateChapman(2.2e12,350,50))
     #print( IntegrateChapmanNumerical(2.2e12,350,50))
-    print(R2upperbound(frequency=25e6,cond=0))
-    print(R2upperbound(frequency=50e6,cond=0))
-    print(R2upperbound(frequency=100e6,cond=0))
-    print(R2upperbound(frequency=150e6,cond=0))
-    print(R2upperbound(frequency=200e6,cond=0))
-    
-    print(R2upperbound(frequency=25e6,cond=1))
-    print(R2upperbound(frequency=50e6,cond=1))
-    print(R2upperbound(frequency=100e6,cond=1))
-    print(R2upperbound(frequency=150e6,cond=1))
-    print(R2upperbound(frequency=200e6,cond=1))
-    
-    print(R2upperbound(frequency=25e6,cond=2))
-    print(R2upperbound(frequency=50e6,cond=2))
-    print(R2upperbound(frequency=100e6,cond=2))
-    print(R2upperbound(frequency=150e6,cond=2))
-    print(R2upperbound(frequency=200e6,cond=2))
+    #print(R2upperbound(frequency=25e6,cond=0))
     #print( IntegrateChapman(2.2e12,350,100))
     
     #plotModels()
@@ -470,14 +502,4 @@ if __name__=='__main__':
     #plt.show()
     
     
-
-
-# In[ ]:
-
-
-
-
-# In[ ]:
-
-
 

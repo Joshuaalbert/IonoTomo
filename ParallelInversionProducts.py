@@ -5,16 +5,6 @@
 
 ### contains tasks to be run in parallel with pp
 
-def getDatumIdx(antIdx,timeIdx,dirIdx,numAnt,numTimes):
-    '''standarizes indexing'''
-    idx = antIdx + numAnt*(timeIdx + numTimes*dirIdx)
-    return idx
-
-def getDatum(datumIdx,numAnt,numTimes):
-    antIdx = datumIdx % numAnt
-    timeIdx = (datumIdx - antIdx)/numAnt % numTimes
-    dirIdx = (datumIdx - antIdx - numAnt*timeIdx)/numAnt/numTimes
-    return antIdx,timeIdx,dirIdx
 
 def fetchPatch(patchFile,timeStart,timeEnd,radioArray):
     import numpy as np
@@ -80,7 +70,7 @@ def fetchPatch(patchFile,timeStart,timeEnd,radioArray):
         antennasArray = np.zeros([len(outAntennas_),3])
         i = 0
         while i < len(outAntennas_):
-            antennasArray[i,:] = outAntennas_[i].transform_to('itrs').cartesian.xyz.to(au.km).value
+            antennasArray[i,:] = outAntennas_[i].transform_to('itrs').cartesian.xyz.to(au.km).value.flatten()
             i += 1
         outAntennas = ac.SkyCoord(antennasArray[:,0]*au.km,antennasArray[:,1]*au.km,antennasArray[:,2]*au.km,
                                  frame = 'itrs')
@@ -89,14 +79,14 @@ def fetchPatch(patchFile,timeStart,timeEnd,radioArray):
     
 def castRay(origins, directions, neTCI, frequency, tmax, N, straightLineApprox):
     '''Calculates TEC for all given rays.
-    ``origins`` is a dict with datumIdx keys
-    ``diretions`` is the directions to integrate
+    ``origins`` is an array with coordinates in prefered frame
+    ``diretions`` is an array with coordinates in prefered frame
     ``tmax`` is the length of rays to use.
     ``neTCI`` is the tri cubic interpolator
     return list of ray trajectories'''
     from FermatClass import Fermat
-    neTCI.clearCache()
-    fermat = Fermat(neTCI=neTCI,frequency = frequency,type='s',straightLineApprox=straightLineApprox)
+    #neTCI.clearCache()
+    fermat = Fermat(neTCI=neTCI,frequency = frequency,type='z',straightLineApprox=straightLineApprox)
     Nr = origins.shape[0]
     rays = []
     r = 0
@@ -106,42 +96,250 @@ def castRay(origins, directions, neTCI, frequency, tmax, N, straightLineApprox):
         x,y,z,s = fermat.integrateRay(origin,direction,tmax,N=N)
         rays.append({'x':x,'y':y,'z':z,'s':s})
         r += 1
-    return rays
+    return rays, neTCI.cache
 
 #def forwardEquations(rays,TCI,mu,Kmu,rho,Krho,numTimes,numDirections):
-def calculateTEC(origins, directions, neTCI, length):
-    '''Calculates TEC for all given rays.
-    ``origins`` is a dict with datumIdx keys
-    ``diretions`` is the directions to integrate
-    ``length`` is the length of rays to use.
-    ``neTCI`` is the tri cubic interpolator
-    return ordered array of tec'''
+
+def calculateTEC(rays, muTCI,K_e):
+    '''Calculates TEC for all given rays in ``rays``.
+    ``muTCI`` is the tri cubic interpolator
+    ``K_e`` the log constant
+    return ordered array of tec and updated cache of muTCI'''
     import numpy as np
     from scipy.integrate import simps
+    #K_e = np.mean(neTCI.m)
+    #mu = np.log(neTCI.m/K_e)
+    #neTCI.m = mu
     #do all 
-    TCI.clearCache()
-    Nr = origins.shape[0]
-    dtec = np.zeros(Nr)
-    for datumIdx in rays.keys():
-        antIdx, dirIdx, timeIdx = reverseDatumIdx(datumIdx,numTimes,numDirections)
-        ray = rays[datumIdx]
-        Ns = len(ray['s'])
-        neint = np.zeros(Ns)
+    #neTCI.clearCache()
+    Nr = len(rays)
+    Ns = len(rays[0]['s'])
+    #muint = np.zeros([Nr,Ns])
+    muint = np.zeros(Ns,dtype=np.double)
+    tec = np.zeros(Nr)
+    i = 0
+    while i < Nr:
+        ray = rays[i]
+        j = 0
+        while j < Ns:
+            x,y,z = ray['x'][j],ray['y'][j],ray['z'][j]
+            #muint[j] = neTCI.interp(x,y,z)
+            muint[j] = muTCI.interp(x,y,z)
+            j += 1
+        tec[i] = simps(K_e*np.exp(muint),rays[i]['s'])/1e13
+        i += 1
+    #tec = simps(K_e*np.exp(muint),rays[0]['s'],axis = 1)/1e13
+    return tec,muTCI.cache
+
+def calculateModelingError(rays,muTCI,K_e,sigma,frequency):
+    '''Calculates model error of TEC for all given rays.
+    ``rays`` used to calculate along
+    ``neTCI`` is the tri cubic interpolator
+    ``sigma`` 
+    ``frequency`` in Hz
+    return ordered array of tec and updated cache'''
+    import numpy as np
+    from scipy.integrate import simps
+    n_p = 1.240e-2 * frequency**2
+    #K_e = np.mean(neTCI.m)
+    #mu = np.log(neTCI.m/K_e)
+    #neTCI.m = mu
+    #do all 
+    #neTCI.clearCache()
+    Nr = len(rays)
+    Ns = len(rays[0]['s'])
+    #muint = np.zeros([Nr,Ns])
+    muint = np.zeros(Ns,dtype=np.double)
+    sigma_tec = np.zeros(Nr)
+    i = 0
+    while i < Nr:
+        ray = rays[i]
+        j = 0
+        while j < Ns:
+            x,y,z = ray['x'][j],ray['y'][j],ray['z'][j]
+            #muint[j] = neTCI.interp(x,y,z)
+            muint[j] = muTCI.interp(x,y,z)
+            j += 1
+        alphaUpper = (K_e*np.exp(muint)*(1. + sigma))/n_p
+        sigma_tec[i] = (n_p/8.)*simps(alphaUpper**3/(1-alphaUpper)**(5./2.),rays[i]['s'])/1e13
+        i += 1
+    #tec = simps(K_e*np.exp(muint),rays[0]['s'],axis = 1)/1e13
+    return sigma_tec,muTCI.cache
+
+def calculateTEC_modelingError(rays, muTCI,K_e,sigma,frequency):
+    '''Calculates TEC for all given rays. and modelling error
+    ``length`` is the length of rays to use.
+    ``muTCI`` is the tri cubic interpolator
+    ``K_e`` log constant
+    return ordered array of tec and updated cache'''
+    import numpy as np
+    from scipy.integrate import simps
+    n_p = 1.240e-2 * frequency**2
+    #K_e = np.mean(neTCI.m)
+    #mu = np.log(neTCI.m/K_e)
+    #neTCI.m = mu
+    #do all 
+    #neTCI.clearCache()
+    Nr = len(rays)
+    Ns = len(rays[0]['s'])
+    #muint = np.zeros([Nr,Ns])
+    muint = np.zeros(Ns,dtype=np.double)
+    tec = np.zeros(Nr)
+    sigma_tec = np.zeros(Nr)
+    i = 0
+    while i < Nr:
+        ray = rays[i]
+        j = 0
+        while j < Ns:
+            x,y,z = ray['x'][j],ray['y'][j],ray['z'][j]
+            muint[j] = muTCI.interp(x,y,z)
+            j += 1
+        alphaUpper = (K_e*np.exp(muint)*(1. + sigma))/n_p
+        sigma_tec[i] = (n_p/8.)*simps(alphaUpper**3/(1-alphaUpper)**(5./2.),rays[i]['s'])/1e13
+        tec[i] = simps(K_e*np.exp(muint),rays[i]['s'])/1e13
+        i += 1
+    #tec = simps(K_e*np.exp(muint),rays[0]['s'],axis = 1)/1e13
+    return tec,sigma_tec,muTCI.cache
+
+def innovationPrimaryCalculation_exponential(rayPairs,muTCI,K_e,L_ne,sigma_ne_factor):
+    '''Calculate the first part of S, i.e. 
+    Int_R^ijk exp(m(x)) [ Int_R^nmp Cm(x,y) exp(x(y)) ]'''
+    import numpy as np
+    from scipy.integrate import simps
+    #from time import clock
+    fp = (7./3. - 4./3. - 1.)
+    Ns = len(rayPairs[0][0]['s'])
+    dy = np.zeros([Ns,Ns],dtype=np.double)
+    dz = np.zeros([Ns,Ns],dtype=np.double)
+    Cm_pair = np.zeros([Ns,Ns],dtype=np.double)
+    outer = np.zeros(Ns,dtype=np.double)   
+    outPairs = np.zeros(len(rayPairs),dtype=np.double)
+    rayPairIdx = 0
+    while rayPairIdx < len(rayPairs):
+        ray1 = rayPairs[rayPairIdx][0]
+        ray2 = rayPairs[rayPairIdx][1]
+        np.subtract.outer(ray1['x'],ray2['x'],out=Cm_pair)
+        np.subtract.outer(ray1['y'],ray2['y'],out=dy)
+        np.subtract.outer(ray1['z'],ray2['z'],out=dz)
+        #dx**2
+        Cm_pair *= Cm_pair
+        #dy**2
+        dy *= dy
+        #dz**2
+        dz *= dz
+        Cm_pair += dy
+        Cm_pair += dz
+        np.sqrt(Cm_pair,out=Cm_pair)
+        Cm_pair /= -L_ne
+        np.exp(Cm_pair,out=Cm_pair)
+        Cm_pair *= sigma_ne_factor**2
+        #transform to Cm = log(1+Cne)
+        Cm_pair += 1.
+        np.log(Cm_pair,out=Cm_pair)
+        #Get the model at points
+        
+        
+        j = 0           
+        while j < Ns:
+            x2,y2,z2 = ray2['x'][j],ray2['y'][j],ray2['z'][j]
+            Cm_pair[:,j] *= np.exp(muTCI.interp(x2,y2,z2))
+            j += 1
+        outer[:] = simps(Cm_pair,ray2['s'],axis=1)
         i = 0
         while i < Ns:
-            x,y,z = ray['x'][i],ray['y'][i],ray['z'][i]
-            neint[i] += TCI.interp(x,y,z)
+            x1,y1,z1 = ray1['x'][i],ray1['y'][i],ray1['z'][i]
+            outer[i] *= np.exp(muTCI.interp(x1,y1,z1))
             i += 1
-        tec = simps(Kmu*np.exp(neint),ray['s'])
-        if Krho is None:
-            Krho = tec/(ray['s'][-1] - ray['s'][0])
-        if dirIdx not in setList:
-            rho[dirIdx] = np.log(tec / (Krho * (ray['s'][-1] - ray['s'][0])))
-            setList.append(dirIdx)
-        dtec[datumIdx] = ( tec - Krho * np.exp(rho[dirIdx]) * (ray['s'][-1] - ray['s'][0]) ) / 1e13
-    return dtec,rho,Krho
+        outPairs[rayPairIdx] = simps(outer,ray1['s'])
+        if False:
+            #import pylab as plt
+            #Q = np.arange(101)
+            #perc = []
+            #for q in Q:
+            #    perc.append(np.percentile(Cm_pair[Cm_pair>0].flatten(),q))
+            #plt.plot(Q,perc)
+            #plt.savefig('perc.pdf',format='pdf')
+            #plt.show
+            threshold = np.percentile(Cm_pair[Cm_pair>64*fp].flatten(),80)
+            #print(threshold)
+            #return
+            mask = Cm_pair > threshold
+            i = 0
+            while i < Ns:
+                x1,y1,z1 = ray1['x'][i],ray1['y'][i],ray1['z'][i]
+                Cm_pair[i,:] *= np.exp(muTCI.interp(x1,y1,z1))
+                j = 0           
+                while j < Ns:
+                    if mask[i,j]:
+                        x2,y2,z2 = ray2['x'][j],ray2['y'][j],ray2['z'][j]
+                        Cm_pair[i,j] *= np.exp(muTCI.interp(x2,y2,z2))
+                    j += 1
+                outer[i] = simps(Cm_pair[i,:],ray2['s'])
+                i += 1
+            outPairs[rayPairIdx] = simps(outer,ray1['s'])
+        rayPairIdx += 1
+    outPairs *= (K_e/1e13)**2
+    return outPairs,muTCI.cache   
 
-
+def innovationAdjointPrimaryCalculation_exponential(rays,muTCI,K_e,L_ne,sigma_ne_factor):
+    '''Calculate the first part of Y, i.e. 
+    Int_R^ijk Cm(x,y) exp(m(y)) ]'''
+    import numpy as np
+    from scipy.integrate import simps
+    fp = (7./3. - 4./3. - 1.)
+    X,Y,Z = muTCI.getModelCoordinates()
+    Nm = len(X)
+    Ns = len(rays[0]['s'])
+    dy = np.zeros([Nm,Ns],dtype=np.double)
+    dz = np.zeros([Nm,Ns],dtype=np.double)
+    Cm_ray = np.zeros([Nm,Ns],dtype=np.double)  
+    outCmGt_primary = np.zeros([Nm,len(rays)],dtype=np.double)
+    rayIdx = 0
+    while rayIdx < len(rays):
+        ray = rays[rayIdx]
+        np.subtract.outer(X,ray['x'],out=Cm_ray)
+        np.subtract.outer(Y,ray['y'],out=dy)
+        np.subtract.outer(Z,ray['z'],out=dz)
+        #dx**2
+        Cm_ray *= Cm_ray
+        #dy**2
+        dy *= dy
+        #dz**2
+        dz *= dz
+        Cm_ray += dy
+        Cm_ray += dz
+        np.sqrt(Cm_ray,out=Cm_ray)
+        Cm_ray /= -L_ne
+        np.exp(Cm_ray,out=Cm_ray)
+        Cm_ray *= sigma_ne_factor**2
+        #transform to Cm = log(1+Cne)
+        Cm_ray += 1.
+        np.log(Cm_ray,out=Cm_ray)
+        #Get the model at points
+        #import pylab as plt
+        #Q = np.arange(101)
+        #perc = []
+        #for q in Q:
+        #    perc.append(np.percentile(Cm_ray[Cm_ray>64*fp].flatten(),q))
+        #plt.plot(Q,perc)
+        #plt.yscale('log')
+        #plt.savefig('adjointPerc.pdf',format='pdf')
+        #return
+        #plt.show
+        #threshold = np.percentile(Cm_ray[Cm_ray>64*fp].flatten(),80)
+        #print(threshold)
+        #return
+        #mask = Cm_ray > threshold
+        j = 0
+        while j < Ns:
+            x,y,z = ray['x'][j],ray['y'][j],ray['z'][j]
+            Cm_ray[:,j] *= np.exp(muTCI.interp(x,y,z))
+            j += 1
+        outCmGt_primary[:,rayIdx] = simps(Cm_ray,ray['s'],axis=1)
+        rayIdx += 1
+    outCmGt_primary *= (K_e/1e13)
+    return outCmGt_primary,muTCI.cache   
+        
 def primaryInversionSteps(dtec,rays,TCI,mu,Kmu,rho,Krho,muprior,rhoprior,sigma_ne,L_ne,sigma_rho,numTimes,numDirections,priorFlag=True):
     '''Performs forward integration of kernel, as well as derivative kernels. Time scales linearly with number of antennas.
     ``dtec`` - dict, datumIdx: dtec

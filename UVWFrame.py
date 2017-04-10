@@ -124,6 +124,12 @@ class UVW(BaseCoordinateFrame):
 
     def __init__(self, *args, **kwargs):
         super(UVW, self).__init__(*args, **kwargs)
+    @property
+    def elevation(self):
+        """
+        Elevation above the horizon of the direction
+        """
+        return self.phase.transform_to(AltAz(location=self.location,obstime=self.obstime)).alt
 
 
 @frame_transform_graph.transform(FunctionTransform, ITRS, UVW)
