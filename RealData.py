@@ -4,14 +4,19 @@
 # In[ ]:
 
 import glob
-from RadioArray import RadioArray
 import numpy as np
+from scipy.interpolate import interp2d
 import astropy.units as au
 import astropy.time as at
 import astropy.coordinates as ac
 import pp
 import h5py
 import os
+import pylab as plt
+
+from RadioArray import RadioArray
+from UVWFrame import UVW
+from PointingFrame import Pointing
 
 
 def getDatumIdx(antIdx,timeIdx,dirIdx,numAnt,numTimes):
@@ -41,6 +46,8 @@ class DataPack(object):
         self.refAnt = None
         print("Loaded {0} antennas, {1} times, {2} directions".format(self.Na,self.Nt,self.Nd))
     
+    def __repr__(self):
+        return "DataPack: numAntennas = {}, numTimes = {}, numDirections = {}\nReference Antenna = {}".format(self.Na,self.Nt,self.Nd,self.refAnt)
     def clone(self):
         dataPack = DataPack({'radioArray':self.radioArray, 'antennas':self.antennas, 'antennaLabels':self.antennaLabels,
                         'times':self.times, 'timestamps':self.timestamps, 'directions':self.directions,
@@ -257,6 +264,23 @@ class DataPack(object):
         self.dtec = self.dtec[mask,:,:]
         self.Na = len(self.antennas)
         
+    def flagPatches(self,patchNames):
+        '''remove data corresponding to the given antenna names if it exists'''
+        assert type(patchNames) == type([]), "{} is not a list of patch names. Choose from {}".format(antennaLabels,self.antennaLabels)
+        mask = np.ones(len(self.patchNames), dtype=bool)
+        patchesFound = 0
+        i = 0
+        while i < self.Nd:
+            if self.patchNames[i] in patchNames:
+                patchesFound += 1
+                mask[i] = False
+            i += 1
+        #some flags may have not existed in data
+        self.patchNames = self.patchNames[mask]
+        self.directions = self.directions[mask]
+        self.dtec = self.dtec[:,:,mask]
+        self.Nd = len(self.directions)
+        
 def transferPatchData(infoFile, dataFolder, hdf5Out):
     '''transfer old numpy format to hdf5. Only run with python 2.7'''
     
@@ -366,72 +390,94 @@ def prepareDataPack(hdf5Datafile,timeStart=0,timeEnd=-1,arrayFile='arrays/lofar.
                 'directions':directions,'patchNames':patchNames,'dtec':dtec}
     return DataPack(dataDict)
 
-def plotDataPack(dataPack,timeIdx=[0], plotAnt=None):
-    import pylab as plt
-    directions, patchNames = dataPack.get_directions(dirIdx=-1)
-    antennas, antLabels = dataPack.get_antennas(antIdx=-1)
-    assert dataPack.refAnt is not None, "set DataPack refAnt first"
-    times,timestamps = dataPack.get_times(timeIdx=timeIdx)
-    dtec = dataPack.get_dtec(antIdx = -1,dirIdx=-1,timeIdx=timeIdx)
+def interpNearest(x,y,z,x_,y_):
+    dx = np.subtract.outer(x_,x)
+    dy = np.subtract.outer(y_,y)
+    r = dx**2
+    dy *= dy
+    r += dy
+    np.sqrt(r,out=r)
+    arg = np.argmin(r,axis=1)
+    z_ = z[arg]
+    return z_
+
+def plotDataPack(datapack,antIdx=-1,timeIdx=[0], dirIdx=-1,figname=None,vmin=None,vmax=None):
+    assert datapack.refAnt is not None, "set DataPack refAnt first"
+    directions, patchNames = datapack.get_directions(dirIdx=dirIdx)
+    antennas, antLabels = datapack.get_antennas(antIdx=antIdx)
+    times,timestamps = datapack.get_times(timeIdx=timeIdx)
+    dtec = np.stack([np.mean(datapack.get_dtec(antIdx = antIdx,dirIdx=dirIdx,timeIdx=timeIdx),axis=1)],axis=1)
     Na = len(antennas)
     Nt = len(times)
     Nd = len(directions)
     refAntIdx = None
-    i = 0
-    while i < Na:
-        if antLabels[i] == dataPack.refAnt:
+    for i in range(Na):
+        if antLabels[i] == datapack.refAnt:
             refAntIdx = i
-            break
-        i += 1
-    assert refAntIdx is not None, "ref ant not in antenna list"
-    i = 0
-    while i < Na:
-        if i != refAntIdx:
-            plotAnt = i
-            break
-        i += 1
+    fixtime = times[Nt>>1]
+    phase = datapack.getCenterDirection()
+    arrayCenter = datapack.radioArray.getCenter()
+    uvw = UVW(location = arrayCenter.earth_location,obstime = fixtime,phase = phase)
+    ants_uvw = antennas.transform_to(uvw)
+    #make plots, M by 4
+    M = (Na>>2) + 1 + 1
+    fig = plt.figure(figsize=(11.,11./4.*M))
     #use direction average as phase tracking direction
-    from UVWFrame import UVW
-    from PointingFrame import Pointing
-    phase = dataPack.getCenterDirection()
-    loc = dataPack.radioArray.getCenter().earth_location
-    f = plt.figure()
-    ax1 = plt.subplot(121)
-    ax2 = plt.subplot(122)
-    j = 0
-    while j < Nt:
-        time = times[j]
-        uvw = UVW(location=loc,obstime=time,phase = phase)
-        pointing = Pointing(location=loc,obstime=time,phase=phase,fixtime=times[0])
-        dirs_uvw = directions.transform_to(pointing)
+    if vmax is None:  
+        vmax = np.percentile(dtec.flatten(),95)
+        vmax=np.max(dtec)
+    if vmin is None:
+        vmin = np.percentile(dtec.flatten(),5)
+        vmin=np.min(dtec)
+    
+    i = 0 
+    while i < Na:
+        ax = fig.add_subplot(M,4,i+1)
+
+        dx = np.sqrt((ants_uvw.u[i] - ants_uvw.u[refAntIdx])**2 + (ants_uvw.v[i] - ants_uvw.v[refAntIdx])**2).to(au.km).value
+        ax.annotate(s="{} : {:.2g} km".format(antLabels[i],dx),xy=(.2,.8),xycoords='axes fraction')
+        #ax.set_title("Ref. Proj. Dist.: {:.2g} km".format(dx))
+        ax.set_xlabel("U km")
+        ax.set_ylabel("V km")
+        N = 25
+        uvw = UVW(location=arrayCenter.earth_location,obstime=fixtime,phase=phase)
+        dirs_uvw = directions.transform_to(uvw)
         factor300 = 300./dirs_uvw.w.value
-        sc1 = ax1.scatter(dirs_uvw.u.value*factor300,dirs_uvw.v.value*factor300, c=dtec[plotAnt,j,:],
-                        vmin=np.min(dtec),vmax=np.max(dtec),s=(100*dtec[plotAnt,j,:]/np.max(np.abs(dtec[plotAnt,:,:])))**2,alpha=0.2)
-        #plot average (over directions) dtec as a function from reference antenna
-        dx = np.sqrt((antennas.transform_to(pointing).u - antennas[refAntIdx].transform_to(pointing).u)**2 + (antennas.transform_to(pointing).v - antennas[refAntIdx].transform_to(pointing).v)**2).to(au.km).value
-        idc = np.argsort(dx)
-        meanDtec = np.mean(dtec[:,j,:],axis = 1)
-        ax2.plot(dx[idc],meanDtec[idc],label=timestamps[j])#,alpha=float(j)/Nt)
-        j += 1
-    plt.legend(frameon=False)
-    plt.colorbar(sc1)
-    plt.show()
+            
+        U,V = np.meshgrid(np.linspace(np.min(dirs_uvw.u.value*factor300),np.max(dirs_uvw.u.value*factor300),N),
+                          np.linspace(np.min(dirs_uvw.v.value*factor300),np.max(dirs_uvw.v.value*factor300),N))
+        D = interpNearest(dirs_uvw.u.value*factor300,dirs_uvw.v.value*factor300,dtec[i,0,:],U.flatten(),V.flatten()).reshape(U.shape)
+        im = ax.imshow(D,origin='lower',extent=(np.min(U),np.max(U),np.min(V),np.max(V)),aspect='auto',
+                      vmin = vmin, vmax= vmax,cmap=plt.cm.coolwarm,alpha=1.)
+        sc1 = ax.scatter(dirs_uvw.u.value*factor300,dirs_uvw.v.value*factor300, c='black',
+                        marker='+')
+        i += 1
+    ax = fig.add_subplot(M,4,Na+1)
+    plt.colorbar(im,cax=ax,orientation='vertical')
+    if figname is not None:
+        plt.savefig("{}.png".format(figname),format='png')
+    else:
+        plt.show()
+    
+def test_plotDataPack():
+    datapack = DataPack(filename="output/test/simulate/datapackSim_turbulent.hdf5")
+    try:
+        os.makedirs('output/test/plotDataPack')
+    except:
+        pass
+    plotDataPack(datapack,antIdx=-1,timeIdx=[0,1,2,3], dirIdx=-1,figname='output/test/plotDataPack/fig')
+
+def test_prepareDataPack():
+    dataPack = prepareDataPack('SB120-129/dtecData.hdf5',timeStart=0,timeEnd=-1,
+                           arrayFile='arrays/lofar.hba.antenna.cfg')
+    dataPack.flagAntennas(['CS007HBA1','CS007HBA0','CS013HBA0','CS013HBA1'])
+    dataPack.setReferenceAntenna(dataPack.antennaLabels[0])
+    #'CS501HBA1'
+    dataPack.save("output/test/datapackObs.hdf5")
 
 if __name__ == '__main__':
     #transferPatchData(infoFile='SB120-129/WendysBootes.npz', 
     #                  dataFolder='SB120-129/', 
     #                  hdf5Out='SB120-129/dtecData.hdf5')
-    dataPack = prepareDataPack('SB120-129/dtecData.hdf5',timeStart=0,timeEnd=-1,
-                           arrayFile='arrays/lofar.hba.antenna.cfg')
-    dataPack.flagAntennas(['CS007HBA1','CS007HBA0','CS013HBA0','CS013HBA1'])
-    dataPack.setReferenceAntenna(dataPack.antennaLabels[1])
-    #'CS501HBA1'
-    dataPack.save("datapackObs.hdf5")
-    dataPack = DataPack(filename="datapackObs.hdf5")
-    plotDataPack(dataPack)
-
-
-# In[ ]:
-
-
+    test_plotDataPack()
 

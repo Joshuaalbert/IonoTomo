@@ -26,14 +26,14 @@ class Fermat(object):
             xvec = data['xvec']
             yvec = data['yvec']
             zvec = data['zvec']
-            self.ne2n(TriCubic(xvec,yvec,zvec,ne))
+            self.ne2n(TriCubic(xvec,yvec,zvec,ne,useCache=True))
             return
         if 'n' in data.keys():
             ne = data['n']
             xvec = data['xvec']
             yvec = data['yvec']
             zvec = data['zvec']
-            self.n2ne(TriCubic(xvec,yvec,zvec,n))
+            self.n2ne(TriCubic(xvec,yvec,zvec,n,useCache=True))
             return
     
     def saveFunc(self,file):

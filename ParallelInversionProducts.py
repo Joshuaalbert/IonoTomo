@@ -85,7 +85,7 @@ def castRay(origins, directions, neTCI, frequency, tmax, N, straightLineApprox):
     ``neTCI`` is the tri cubic interpolator
     return list of ray trajectories'''
     from FermatClass import Fermat
-    #neTCI.clearCache()
+    import numpy as np
     fermat = Fermat(neTCI=neTCI,frequency = frequency,type='z',straightLineApprox=straightLineApprox)
     Nr = origins.shape[0]
     rays = []
@@ -96,7 +96,7 @@ def castRay(origins, directions, neTCI, frequency, tmax, N, straightLineApprox):
         x,y,z,s = fermat.integrateRay(origin,direction,tmax,N=N)
         rays.append({'x':x,'y':y,'z':z,'s':s})
         r += 1
-    return rays, neTCI.cache
+    return rays
 
 #def forwardEquations(rays,TCI,mu,Kmu,rho,Krho,numTimes,numDirections):
 
@@ -233,9 +233,9 @@ def innovationPrimaryCalculation_exponential(rayPairs,muTCI,K_e,L_ne,sigma_ne_fa
         Cm_pair /= -L_ne
         np.exp(Cm_pair,out=Cm_pair)
         Cm_pair *= sigma_ne_factor**2
-        #transform to Cm = log(1+Cne)
-        Cm_pair += 1.
-        np.log(Cm_pair,out=Cm_pair)
+        #transform to Cm = log(1+Cne/mean(n1)/mean(n2)) ~ Cne/mean(n1)/mean(n2)
+        #Cm_pair += 1.
+        #np.log(Cm_pair,out=Cm_pair)
         #Get the model at points
         
         

@@ -254,6 +254,9 @@ def R2upperbound(frequency=100e6,cond=0):
     print("freq:",frequency,"cond:",cond,"alphahat:{0:1.1e}".format(np.mean(alpha)),"sigma_alpha^2:{0:1.1e}".format(np.mean(alpha**2)-np.mean(alpha)**2))
     return "{0:1.1e}".format(simps(integrand,h)*n_p/8./1e16)
 
+
+
+
 def aPrioriModel(h,zenith):
     '''Return a stratified reference ionosphere based on fitted data depending on zenith angle of the sun in degrees'''
     def peakDensity(n0,dn,tau,b,zenith):

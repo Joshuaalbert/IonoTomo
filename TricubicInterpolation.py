@@ -1,12 +1,7 @@
 
 # coding: utf-8
 
-# In[6]:
-
-
-
-
-# In[ ]:
+# In[9]:
 
 '''Based on the paper doi=10.1.1.89.7835
 the tricubic interpolation of a regular possibly non uniform grid can be seen as a computation of 21 cubic splines.
@@ -45,8 +40,10 @@ class TriCubic(object):
         self.useCache = useCache
         if self.useCache:
             self.cache = {}
+            #self.cacheCount = np.zeros(self.nx*self.ny*self.nz,dtype=np.double)
         else:
             self.cache = None
+            self.cacheCount = None
         #print(self.iPowers,self.jPowers,self.kPowers)
     
     def copy(self,**kwargs):
@@ -112,6 +109,9 @@ class TriCubic(object):
         xi = self.bisection(self.xvec,x)
         yi = self.bisection(self.yvec,y)
         zi = self.bisection(self.zvec,z)
+        assert xi > 1 and xi < self.nx - 2, "x index {} on boundary!".format(xi)
+        assert yi > 1 and yi < self.ny - 2, "y index {} on boundary!".format(yi)
+        assert zi > 1 and zi < self.nz - 2, "z index {} on boundary!".format(zi)
         return xi,yi,zi
 
     
@@ -128,13 +128,14 @@ class TriCubic(object):
         
     def checkIndexing(self,M,N=100):
         '''Check that ordering of elements is correct'''
+        assert not np.any(np.isnan(M)), "M contains nans"
         N = min(N,np.size(self.m))
         idx = 0
         while idx < N:
             i = np.random.randint(self.nx)
             j = np.random.randint(self.ny)
             k = np.random.randint(self.nz)
-            assert self.m[self.index(i,j,k)] == M[i,j,k], "Ordering of indexing is wrong"
+            assert self.m[self.index(i,j,k)] == M[i,j,k], "Ordering of indexing is wrong, m[{},{},{}] != {}, M[{},{},{}] = {}".format(i,j,k,self.m[self.index(i,j,k)],i,j,k,M[i,j,k])
             idx += 1
         assert np.alltrue(self.getShapedArray() == M), "reshape is not right"
         return True
@@ -142,48 +143,30 @@ class TriCubic(object):
     def getInterpolant(self,x,y,z):
         '''vectorized build the interpolant'''
         xi,yi,zi = self.getInterpIndex(x,y,z)
+        
         #print(xi,yi,zi)
-        try:
-            ijk = self.index(xi,yi,zi)#bottom corner of cube
-            if self.useCache:
-                if ijk in self.cache.keys():
-                    A_ijk = self.cache[ijk]
-                else:
-                    b = self.get_bVec(xi,yi,zi)
-                    A_ijk = self.Binv.dot(b).ravel()
-                self.cache[ijk] = A_ijk
+        ijk = self.index(xi,yi,zi)#bottom corner of cube
+        if self.useCache:
+            if ijk in self.cache.keys():
+                A_ijk = self.cache[ijk]
             else:
                 b = self.get_bVec(xi,yi,zi)
                 A_ijk = self.Binv.dot(b).ravel()
-        except:
-            A_ijk = None
+            self.cache[ijk] = A_ijk
+            #self.cacheCount[ijk] += 1
+        else:
+            b = self.get_bVec(xi,yi,zi)
+            A_ijk = self.Binv.dot(b).ravel()
         return xi,yi,zi,A_ijk
     
     def interp(self,x,y,z,doDiff=False):
         '''Interpolate and return f,fx,fy,fz if doDouble is True then return also fxy,fxz, fyz.
         Double derivatives do not yet work I think.'''
-        xi,yi,zi,A_ijk = self.getInterpolant(x,y,z)
-        if xi == -1:#outside entire array
-            xi = 0
-        if xi == self.nx:
-            xi = self.nx-2
-        if yi == -1:
-            yi = 0
-        if yi == self.ny:
-            yi = self.ny - 2
-        if zi == -1:
-            zi = 0
-        if zi == self.nz:
-            zi = self.nz - 2
-        if A_ijk is None:#outside array or near edges
-            if self.default is not None:
-                f = self.default
-            else:
-                f = self.m[self.index(xi,yi,zi)]#nearest
-            if doDiff:
-                return f,0.,0.,0.,0.,0.,0.,0.
-            else:
-                return f        
+        
+        #xi,yi,zi,A_ijk = self.getInterpolant(x,y,z)
+        xi,yi,zi = self.getInterpIndex(x,y,z)
+        ijk = self.index(xi,yi,zi)
+        return self.m[ijk]
         u = (x - self.xvec[xi])/(self.xvec[xi+1] - self.xvec[xi])
         v = (y - self.yvec[yi])/(self.yvec[yi+1] - self.yvec[yi])
         w = (z - self.zvec[zi])/(self.zvec[zi+1] - self.zvec[zi])
@@ -1284,7 +1267,8 @@ def testResult():
     from sympy import exp,sqrt,sin,symbols,lambdify
     x,y,z = symbols('x y z')
     #define the test function - no singularities 
-    func = x*y*z + x**2*z + y**2*z + z**2*x#sin(2*np.pi*x*5)*sin(2*np.pi*5*y)*sin(2*np.pi*z*5)
+    func = 3*exp(-((x-0.5)**2 + (y-0.5)**2 + (z-0.5)**2)/2./0.2**2) + 2*exp(-((x-0.25)**2 + (y-0.25)**2 + (z-0.25)**2)/2./0.2**2)
+
     f = lambdify((x,y,z),func,'numpy')
     fx = lambdify((x,y,z),func.diff(x),'numpy')
     fy = lambdify((x,y,z),func.diff(y),'numpy')
@@ -1302,38 +1286,15 @@ def testResult():
     res = []
     for i in range(20):
         x,y,z = np.random.uniform(size=3)
-        f_,fx_,fy_,fz_,fxy_,fxz_,fyz_,fxyz_ = tci.interp(x,y,z,doDiff=True)
+        f_ = tci.interp(x,y,z,doDiff=False)
+        res.append(abs((f(x,y,z) - f_)/f(x,y,z)))
+        print("fractional errors at:",x,y,z)
+        print("f:",f(x,y,z),f_,f(x,y,z)-f_)
 
-        try:
-            res.append(abs((f(x,y,z) - f_)/f(x,y,z)))
-            print("fractional errors at:",x,y,z)
-            print("f:",(f(x,y,z) - f_)/f(x,y,z))
-            print("fx:",(fx(x,y,z) - fx_)/fx(x,y,z))
-            print("fy:",(fy(x,y,z) - fy_)/fy(x,y,z))
-            print("fz:",(fz(x,y,z) - fz_)/fz(x,y,z))
-            print("fxy:",(fxy(x,y,z) - fxy_)/fxy(x,y,z))
-            print("fxz:",(fxz(x,y,z) - fxz_)/fxz(x,y,z))
-            print("fyz:",(fyz(x,y,z) - fyz_)/fyz(x,y,z))
-            print("fxyz:",(fxyz(x,y,z) - fxyz_)/fxyz(x,y,z))
-        except:
-            pass
     import pylab as plt
     plt.hist(res)
     plt.show()
     return
-    X,Y,Z = np.meshgrid(xvec[2:-2],yvec[2:-2],zvec[2:-2],indexing='ij')
-    for x,y,z in zip(X.flatten(),Y.flatten(),Z.flatten()):
-        res = tci.interp(x,y,z,doDiff=True)
-        f_,fx_,fy_,fz_,fxy_,fxz_,fyz_,fxyz_ = res
-        print("fractional errors at:",x,y,z)
-        print("f:",(f(x,y,z) - f_)/f(x,y,z))
-        print("fx:",(fx(x,y,z) - fx_)/fx(x,y,z))
-        print("fy:",(fy(x,y,z) - fy_)/fy(x,y,z))
-        print("fz:",(fz(x,y,z) - fz_)/fz(x,y,z))
-        print("fxy:",(fxy(x,y,z) - fxy_)/fxy(x,y,z))
-        print("fxz:",(fxz(x,y,z) - fxz_)/fxz(x,y,z))
-        print("fyz:",(fyz(x,y,z) - fyz_)/fyz(x,y,z))
-        print("fxyz:",(fxyz(x,y,z) - fxyz_)/fxyz(x,y,z))
         
 def timeTest(N=100):
     from time import clock
@@ -1342,9 +1303,9 @@ def timeTest(N=100):
     zvec = np.arange(300)
     M = np.random.uniform(size=[500,400,300])
     tci = TriCubic(xvec,yvec,zvec,M)
-    x = np.random.uniform(size=N)*500
-    y = np.random.uniform(size=N)*400
-    z = np.random.uniform(size=N)*300
+    x = np.random.uniform(low = 3, high = 498,size=N)
+    y = np.random.uniform(low = 3, high = 398,size=N)
+    z = np.random.uniform(size=N)
     startTime = clock()
     for i in xrange(N):
         y2 = tci.interp(x[i],y[i],z[i])
@@ -1357,8 +1318,8 @@ def saveTest():
     zvec = np.arange(300)
     M = np.random.uniform(size=[500,400,300])
     tci = TriCubic(xvec,yvec,zvec,M)
-    tci.save("testest.npy")
-    tci2 = TriCubic(filename="testest.npy")
+    tci.save("test/testTCI.hdf5")
+    tci2 = TriCubic(filename="test/testTCI.hdf5")
     assert np.alltrue(tci.m==tci2.m), "m is not equal"
     
     
@@ -1366,8 +1327,13 @@ if __name__=='__main__':
     np.random.seed(1234)
     #generateBinv()
     #optimizeBvecFormation()
-    #testResult()
+    testResult()
     #timeTest(N=10000)
-    saveTest()
+    #saveTest()
+
+
+
+# In[ ]:
+
 
 

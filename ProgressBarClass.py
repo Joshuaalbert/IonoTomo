@@ -28,9 +28,11 @@ class ProgressBar(object):
         self.startTime = clock()
 
     def __call__(self,current=None):
-        '''Assumes current is zero based index completed, i.e. current=0 means 1 iteration completed'''
+        '''Assumes current is iterations done '''
         if current is not None:
-            self.current = current + 1
+            self.current = current
+        if self.current == 0:
+            return
         percent = self.current / float(self.total)
         size = int(self.width * percent)
         remaining = self.total - self.current
@@ -58,8 +60,8 @@ if __name__ == '__main__':
 
     progress = ProgressBar(80, fmt=ProgressBar.FULL)
 
-    for x in xrange(progress.total):
-        progress(x)
+    for x in range(progress.total):
+        progress(x+1)
         sleep(0.1)
     progress.done()
 
