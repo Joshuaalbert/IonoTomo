@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[4]:
+# In[1]:
 
 import numpy as np
 from scipy.integrate import simps
@@ -28,11 +28,10 @@ def doForwardEquation(rays,K_ne,mTCI):
                 idx += 1
             
             np.exp(nevec,out=nevec)
-            nevec *= K_ne
+            nevec *= K_ne/1e13
             g[j,k] += simps(nevec,s)
             k += 1
         j += 1
-    g /= 1e13
     return g
                 
 
@@ -67,7 +66,7 @@ def test_forwardEquation():
     from CalcRays import calcRays
     import pylab as plt
     datapack = DataPack(filename="output/test/datapackObs.hdf5")
-    datapackSel = selectAntennaFacets(8, datapack, antIdx=-1, dirIdx=-1, timeIdx = [0])
+    datapackSel = selectAntennaFacets(15, datapack, antIdx=-1, dirIdx=-1, timeIdx = [0])
     antennas,antennaLabels = datapackSel.get_antennas(antIdx = -1)
     patches, patchNames = datapackSel.get_directions(dirIdx = -1)
     times,timestamps = datapackSel.get_times(timeIdx=[0])
@@ -77,14 +76,16 @@ def test_forwardEquation():
     fixtime = times[Nt>>1]
     phase = datapack.getCenterDirection()
     arrayCenter = datapack.radioArray.getCenter()
-    neTCI = TriCubic(filename="output/test/neModelTurbulent.hdf5")
-    rays = calcRays(antennas,patches,times, arrayCenter, fixtime, phase, neTCI, datapack.radioArray.frequency, True, 1000, 1000)
+    neTCI = TriCubic(filename="output/test/simulate/simulate_0/neModel.hdf5")
+    rays = calcRays(antennas,patches,times, arrayCenter, fixtime, phase, neTCI, datapack.radioArray.frequency, True, 1000, 250)
     K_ne = np.mean(neTCI.m)
     neTCI.m = np.log(neTCI.m/K_ne)
     mTCI = neTCI
     i0 = 0
     
     g = forwardEquation_dask(rays,K_ne,mTCI,i0)
+    get_ipython().magic('time forwardEquation_dask(rays,K_ne,mTCI,i0)')
+    get_ipython().magic('timen 3 forwardEquation(rays,K_ne,mTCI,i0)')
     
     m = mTCI.m.copy()
     i0 = 0

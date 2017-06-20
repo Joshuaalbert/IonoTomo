@@ -1,10 +1,11 @@
 
 # coding: utf-8
 
-# In[5]:
+# In[ ]:
 
 '''Do a line search to find minimum in gradient direction'''
 import numpy as np
+import pylab as plt
 
 from ForwardEquation import forwardEquation, forwardEquation_dask
 from TricubicInterpolation import TriCubic
@@ -49,12 +50,25 @@ def lineSearch(rays,K_ne,mTCI,i0,gradient,g,dobs,CdCt,figname=None):
     ep_a = []
     S_a = []
     S = S0
-    epsilon_n = 1e-5
+    #initial epsilon_n 
+    dd = (g - dobs)/(CdCt + 1e-15)
+    ep = 1e-3
+    g_ = forwardEquation(rays,K_ne,TriCubic(mTCI.xvec,mTCI.yvec,mTCI.zvec,M - ep*gradient),i0)
+    Gm = (g - g_)/ep
+    #numerator
+    dd *= Gm
+    numerator = 2.*np.sum(dd)
+    #denominator
+    Gm *= Gm
+    Gm /= (CdCt + 1e-15)
+    denominator = np.sum(Gm)
+    epsilon_n0 = np.abs(numerator/denominator)
+    epsilon_n = epsilon_n0
     iter = 0
-    while S >= S0 or iter < 5:
+    while S >= S0 or iter < 3:
         epsilon_n /= 2.
         #mTCI.m = m - epsilon_n*gradient.ravel('C')
-        g = forwardEquation_dask(rays,K_ne,TriCubic(mTCI.xvec,mTCI.yvec,mTCI.zvec,M - epsilon_n*gradient),i0)
+        g = forwardEquation(rays,K_ne,TriCubic(mTCI.xvec,mTCI.yvec,mTCI.zvec,M - epsilon_n*gradient),i0)
         #print(np.mean(g),np.var(g))
         dd = (g - dobs)**2/(CdCt + 1e-15)
         S = np.sum(dd)/2.
@@ -69,19 +83,21 @@ def lineSearch(rays,K_ne,mTCI,i0,gradient,g,dobs,CdCt,figname=None):
     g = forwardEquation_dask(rays,K_ne,TriCubic(mTCI.xvec,mTCI.yvec,mTCI.zvec,M - epsilon_n*gradient),i0)
     dd = (g - dobs)**2/(CdCt + 1e-15)
     S = np.sum(dd)/2.
-    print("S0: {}".format(S0))
-    print("Parabolic minimum: {}, {}".format(epsilon_n,S_p))
-    print("misfit: {}, {}".format(epsilon_n,S))
+    print("S0: {} | Estimated epsilon_n: {}".format(S0, epsilon_n0))
+    print("Parabolic minimum | epsilon_n = {}, S = {}".format(epsilon_n,S_p))
+    print("Actual | S = {}".format(S))
+    print("Misfit Reduction: {:.2f}%".format(S/S0*100. - 100.))
     if figname is not None:
-        import pylab as plt
         plt.plot(ep_a,S_a)
         plt.scatter(epsilon_n,S,c='green',label='Final misfit')
         #plt.scatter(epsilon_n,S_p,c='red',label='Parabolic minimum')
         plt.yscale('log')
-        plt.plot([np.min(ep_a),np.max(ep_a)],[S0,S0],ls='--',c='red')
+        plt.plot([min(epsilon_n,np.min(ep_a)),max(epsilon_n,np.max(ep_a))],[S0,S0],ls='--',c='red')
+        plt.xscale('log')
         plt.legend(frameon=False)
         plt.savefig("{}.png".format(figname),format='png')
-    return epsilon_n
+        
+    return epsilon_n,S,(S/S0 - 1.)
     
 def test_lineSearch():
     from RealData import DataPack

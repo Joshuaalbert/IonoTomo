@@ -227,21 +227,21 @@ if __name__ == '__main__':
                  [0,0,0]],dtype=np.bool))
     #measurements
     S = np.array([[  66.034     ,    7.653     ,    4.241     ],
-       [ 159.14      ,   62.206     ,   45.998     ],
-       [ 147.575     ,   77.056     ,   46.834     ],
-       [  10.40630611,    3.98776452,    1.16477836],
-       [  57.346     ,   22.343     ,    7.6797    ],
-       [  40.672     ,    4.556     ,    0.48076422],
-       [   9.45811655,    5.508     ,    4.426     ],
-       [  32.342     ,   15.314     ,    9.277     ]],dtype=np.double)
+        [ 159.14      ,   62.206     ,   45.998     ],
+        [ 147.575     ,   77.056     ,   46.834     ],
+        [  19.28183596,    6.89683661,    2.9826925 ],
+        [  57.346     ,   22.343     ,    7.6797    ],
+        [  40.672     ,    4.556     ,    0.48076422],
+        [   9.45811655,    5.508     ,    4.426     ],
+        [  32.342     ,   15.314     ,    9.277     ]],dtype=np.double)
     std_d = np.array([[  6.58200000e+00,   2.94200000e-01,   3.12511200e-01],
-       [  7.85100000e+00,   3.86200000e-01,   1.05200000e-01],
-       [  8.11100000e+00,   3.54800000e-01,   3.58600000e-01],
-       [  1.34408838e+00,   2.55608364e-01,   4.16152840e-01],
-       [  7.16500000e+00,   3.11300000e-01,   2.90741019e-04],
-       [  7.82100000e+00,   2.09200000e-01,   8.90090959e-02],
-       [  1.40738833e+00,   2.27200000e-01,   2.34200000e-01],
-       [  8.07500000e+00,   2.77200000e-01,   3.67694221e-01]],dtype=np.double)
+        [  7.85100000e+00,   3.86200000e-01,   1.05200000e-01],
+        [  8.11100000e+00,   3.54800000e-01,   3.58600000e-01],
+        [  1.40738833e+00,   2.66343558e-01,   4.32929199e-01],
+        [  7.16500000e+00,   3.11300000e-01,   2.90741019e-04],
+        [  7.82100000e+00,   2.09200000e-01,   8.90090959e-02],
+        [  1.40738833e+00,   2.27200000e-01,   2.34200000e-01],
+        [  8.07500000e+00,   2.77200000e-01,   3.67694221e-01]],dtype=np.double)
     S = np.array([[66.034,7.653,2.357 + 1.884],#c12
                   [159.140,62.206,45.998],#nw1
                  [147.575,77.056,46.834],#nw2
@@ -258,9 +258,6 @@ if __name__ == '__main__':
                  [7.821,2.092E-1,rms[2]*np.sqrt(39.1/beams[2])],#x1
                  [rms[0]*np.sqrt(937.1/beams[0]),2.272E-1,2.342E-1],#x2
                  [8.075,2.772E-1,np.sqrt(1.900E-1**2 + 3.148E-1**2)]],dtype=np.double)#s
-    
-    
-    
     Cd = std_d**2
     Ct = (S*0.15)**2
     CdCt = Cd + Ct
@@ -289,7 +286,7 @@ if __name__ == '__main__':
         alpha_,std_alpha_,S14_,S14u_,S14l_, S_post_mu_,S_post_up_,S_post_low_,P14_post_mu_,P14_post_up_,P14_post_low_ = MHSolveSpectealIndex(nu[mask],S[idx,mask],
                                                                                                                                              Cd[idx,mask],Ct[idx,mask],
                                                                                                                                              names[idx],0.516,0.002,nuModel=nu,plot=True,
-                                                                                                                                            plotDir='spectral-figs') 
+                                                                                                                                            plotDir=None) 
         alpha[idx] = alpha_
         std_alpha[idx] = std_alpha_
         S14[idx] = S14_
@@ -313,63 +310,17 @@ if __name__ == '__main__':
                                                                                                  S14[i],S14u[i],S14l[i],
                                                                                                  P14[i],P14u[i],P14l[i]))
         i += 1
-    f, axs = plt.subplots(4,2,sharex=True,figsize=(11,11))
-    cols= 2
-    rows = 4
-    i=0
-    while i < len(alpha):
-        #i = row*2 + col
-        col = i%cols
-        row = (i - col)//cols
-        if rows == 1:
-            if cols == 1:
-                ax = axs
-            else:
-                ax = axs[col]
-        else:
-            ax = axs[row][col]
-        mask = detectionMask[i,:]
-        mask[:] = True
-        ax.errorbar(nu[mask], S[i,mask], yerr=np.sqrt(CdCt[i,mask]), fmt='x',label='data')
-        ax.errorbar(nu, S_post_mu[i,:], yerr=[S_post_up[i,:],S_post_low[i,:]], fmt='--o',label='model')
-        points = []
-        for j in range(len(nu)):
-            points.append((nu[j],S_post_mu[i,j] + S_post_up[i,j]))
-            #points.append((nuModel[j],S_post_mu[j] - S_post_low[j]))
-        for j in range(len(nu)):
-            #points.append((nuModel[j],S_post_mu[j] + S_post_up[j]))
-            points.append((nu[-j-1],S_post_mu[i,-j-1] - S_post_low[i,-j-1]))
-            
-        ax.add_collection(PatchCollection([Polygon(points,True)],alpha=0.4))
-
-        #ax.set_ylim([])
-        ax.set_yscale('log')
-        ax.set_xscale('log')
-        ylims = list(ax.get_ylim())
-        ylims[0] = 10**(np.floor(np.log10(ylims[0])))
-        ylims[1] = 10**(np.ceil(np.log10(ylims[1])))
-        print(ylims)
-        ax.set_ylim(ylims)
-        ax.set_xticks([])#('right')
-        ax.set_xticklabels([])
-        if col==1:
-            ax.yaxis.set_label_position('right')
-        i += 1
-    #axs[-1][0].set_xlabel(r'$\nu$ [Hz]')
-    #axs[-1][1].set_xlabel(r'$\nu$ [Hz]')
-    #axs[4>>1][0].set_ylabel(r'$S(\nu)$ [mJy]')
-    f.subplots_adjust(hspace=0,wspace=0)
-
-    plt.setp([ax.get_xticklabels() for ax in f.axes],visible=False)
-    plt.setp([ax.get_yticklabels() for ax in f.axes],visible=False)
-    plt.show()
+    
 
 
-# In[10]:
+# In[2]:
 
-def plotSpectrum(nu,S,CdCt,S_post_mu,S_post_up,S_post_low, mask, ax):
-    ax.errorbar(nu[mask], S[mask], yerr=np.sqrt(CdCt[mask]), fmt='x',label='data')
-    ax.errorbar(nu, S_post_mu, yerr=[S_post_up,S_post_low], fmt='--o',label='model')
+from matplotlib.ticker import MaxNLocator
+
+def plotSpectrum(nu,S,CdCt,S_post_mu,S_post_up,S_post_low, mask, ax, name):
+    ax.errorbar(nu[mask], S[mask], yerr=np.sqrt(CdCt[mask]), c='black', lw=1.,fmt='--.',label='data')
+    #ax.errorbar(nu, S_post_mu, yerr=[S_post_up,S_post_low], fmt='--o',label='model')
+    ax.plot(nu, S_post_mu, c='orange',ls='-',label='model')
     points = []
     for j in range(len(nu)):
         points.append((nu[j],S_post_mu[j] + S_post_up[j]))
@@ -384,13 +335,24 @@ def plotSpectrum(nu,S,CdCt,S_post_mu,S_post_up,S_post_low, mask, ax):
     ax.set_yscale('log')
     ax.set_xscale('log')
     ylims = list(ax.get_ylim())
-    ylims[0] = 10**(np.floor(np.log10(ylims[0])))
-    ylims[1] = 10**(np.ceil(np.log10(ylims[1])))
-    ax.set_ylim(ylims)
-    ax.set_xticks([])#('right')
+    ylims[0] = 10**(np.floor(np.log10(np.min(S_post_mu - S_post_low))))
+    ylims[1] = 10**(np.ceil(np.log10(np.max(S_post_mu+S_post_up))))
+    ax.set_ybound(lower=ylims[0],upper=ylims[1])
+    ax.set_ylim(ylims[0],ylims[1])
+    ax.set_yticks([10**e for e in range(int(np.log10(ylims[0])),int(np.log10(ylims[1])+1))])
+    ylabs = [r"$10^{{{:d}}}$".format(int(np.log10(tick))) for tick in ax.get_yticks()]
+    #ylabs[0] = " "
+    #ylabs[1] = " "
+    #print(name,ylabs)
+    ax.set_yticklabels(ylabs)
+    ax.set_xbound(lower=100e6,upper=1500e6)
+    ax.annotate(s=name,xy=(0.05,0.05),xycoords='axes fraction',weight='bold')
+    #ax.set_xticks([])#('right')
     ax.set_xticklabels([])
     
-f, axs = plt.subplots(4,2,sharex=True,figsize=(11,11))
+    return ax
+    
+f, axs = plt.subplots(4,2,figsize=(5,7))
 cols= 2
 rows = 4
 i=0
@@ -405,23 +367,35 @@ while i < len(alpha):
             ax = axs[col]
     else:
         ax = axs[row][col]
+    #plt.figure()
+    #ax = plt.subplot(111)
     mask = detectionMask[i,:]
     mask[:] = True
-    plotSpectrum(nu,S[i,:],CdCt[i,:],S_post_mu[i,:],S_post_up[i,:],S_post_low[i,:],mask, ax)
+    plotSpectrum(np.append(nu,1400e6),np.append(S[i,:],0),np.append(CdCt[i,:],0),np.append(S_post_mu[i,:],S14[i]),
+                 np.append(S_post_up[i,:],S14u[i]),np.append(S_post_low[i,:],S14l[i]),np.append(mask,False), ax,names[i])
     if col==1:
         ax.yaxis.set_label_position('right')
+        ax.yaxis.tick_right()
+    if row != 0:
+        ax.get_yticklabels()[-1].set_visible(False)
+    #ax.yaxis.set_ticks(ax.yaxis.get_ticklocs()[0:-1])
+    if row == rows - 1:
+        ax.xaxis.set_ticks((list(nu) + [1400e6]))
+        ax.xaxis.set_ticklabels(["{:3d}".format(int(f/1e6)) for f in (list(nu) + [1400e6])])
+        ax.set_xlabel(r"$\nu$ [MHz]")
+    if i == 0:
+        ax.legend(frameon=False,loc='upper right')
+    if col == 0:
+        ax.set_ylabel(r"$S(\nu)$ [mJy]")
     i += 1
 #axs[-1][0].set_xlabel(r'$\nu$ [Hz]')
 #axs[-1][1].set_xlabel(r'$\nu$ [Hz]')
 #axs[4>>1][0].set_ylabel(r'$S(\nu)$ [mJy]')
 f.subplots_adjust(hspace=0,wspace=0)
+plt.savefig("spix_v2.pdf")
 
-plt.setp([ax.get_xticklabels() for ax in f.axes],visible=False)
-plt.setp([ax.get_yticklabels() for ax in f.axes],visible=False)
+
+#plt.setp([ax.get_xticklabels() for ax in f.axes],visible=False)
+#plt.setp([ax.get_yticklabels() for ax in f.axes],visible=False)
 plt.show()
-
-
-# In[ ]:
-
-
 

@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[1]:
+# In[2]:
 
 import numpy as np
 from ForwardEquation import forwardEquation, forwardEquation_dask
@@ -35,17 +35,17 @@ def test_simulateDatapack():
     from PlotTools import animateTCISlices
     import os
     datapack = DataPack(filename="output/test/datapackObs.hdf5")
-    for i in range(5):
+    for i in range(1,5):
         try:
             os.makedirs("output/test/simulate/simulate_{}/fig".format(i))
         except:
             pass
         N = 15
-        datapackSel = selectAntennaFacets(N, datapack, antIdx=-1, dirIdx=-1, timeIdx = [0])
-        turbTCI = createTurbulentlModel(datapackSel,antIdx = -1, timeIdx = [0], dirIdx = -1, zmax = 1000.,spacing=5.)
-        nePriorTCI = createInitialModel(datapackSel,antIdx = -1, timeIdx = [0], dirIdx = -1, zmax = 1000.,spacing=5.)
+        #datapackSel = selectAntennaFacets(N, datapack, antIdx=-1, dirIdx=-1, timeIdx = [0])
+        turbTCI = createTurbulentlModel(datapack,antIdx = -1, timeIdx = [0], dirIdx = -1, zmax = 1000.,spacing=5.)
+        nePriorTCI = createInitialModel(datapack,antIdx = -1, timeIdx = [0], dirIdx = -1, zmax = 1000.,spacing=5.)
         turbTCI.save("output/test/simulate/simulate_{}/neModel.hdf5".format(i))
-        datapackSim = simulateDatapack(datapackSel,turbTCI,0, antIdx = -1, timeIdx=[0], dirIdx=-1)
+        datapackSim = simulateDatapack(datapack,turbTCI,0, antIdx = -1, timeIdx=[0], dirIdx=-1)
         datapackSim.save("output/test/simulate/simulate_{}/datapackSim.hdf5".format(i))
         plotDataPack(datapackSim,antIdx=-1,timeIdx=[0], dirIdx=-1,figname="output/test/simulate/simulate_{}/dobs".format(i))
         turbTCI.m -= nePriorTCI.m

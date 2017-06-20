@@ -224,7 +224,7 @@ class DataPack(object):
                 break
             i += 1          
         assert refAntIdx is not None, "{} is not a valid antenna. Choose from {}".format(refAnt,self.antennaLabels)
-        print("Setting refAnt: {}".format(refAnt))
+        #print("Setting refAnt: {}".format(refAnt))
         self.refAnt = refAnt
         self.dtec = self.dtec - self.dtec[refAntIdx,:,:]
         
@@ -419,16 +419,25 @@ def plotDataPack(datapack,antIdx=-1,timeIdx=[0], dirIdx=-1,figname=None,vmin=Non
     arrayCenter = datapack.radioArray.getCenter()
     uvw = UVW(location = arrayCenter.earth_location,obstime = fixtime,phase = phase)
     ants_uvw = antennas.transform_to(uvw)
+    
+    dtec = np.stack([np.mean(dtec,axis=1)],axis=1)
     #make plots, M by 4
     M = (Na>>2) + 1 + 1
     fig = plt.figure(figsize=(11.,11./4.*M))
     #use direction average as phase tracking direction
     if vmax is None:  
-        vmax = np.percentile(dtec.flatten(),95)
-        vmax=np.max(dtec)
+        vmax = np.percentile(dtec.flatten(),99)
+        #vmax=np.max(dtec)
     if vmin is None:
-        vmin = np.percentile(dtec.flatten(),5)
-        vmin=np.min(dtec)
+        vmin = np.percentile(dtec.flatten(),1)
+        #vmin=np.min(dtec)
+    
+        
+    N = 25
+    dirs_uvw = directions.transform_to(uvw)
+    factor300 = 300./dirs_uvw.w.value
+    U,V = np.meshgrid(np.linspace(np.min(dirs_uvw.u.value*factor300),np.max(dirs_uvw.u.value*factor300),N),
+                          np.linspace(np.min(dirs_uvw.v.value*factor300),np.max(dirs_uvw.v.value*factor300),N))
     
     i = 0 
     while i < Na:
@@ -436,16 +445,16 @@ def plotDataPack(datapack,antIdx=-1,timeIdx=[0], dirIdx=-1,figname=None,vmin=Non
 
         dx = np.sqrt((ants_uvw.u[i] - ants_uvw.u[refAntIdx])**2 + (ants_uvw.v[i] - ants_uvw.v[refAntIdx])**2).to(au.km).value
         ax.annotate(s="{} : {:.2g} km".format(antLabels[i],dx),xy=(.2,.8),xycoords='axes fraction')
+        if i == 0:
+            #ax.annotate(s="{} : {:.2g} km\n{}".format(antLabels[i],dx,fixtime.isot),xy=(.2,.8),xycoords='axes fraction')
+            #ax.annotate(s=fixtime.isot,xy=(.2,0.05),xycoords='axes fraction')
+            ax.set_title(fixtime.isot)
         #ax.set_title("Ref. Proj. Dist.: {:.2g} km".format(dx))
         ax.set_xlabel("U km")
         ax.set_ylabel("V km")
-        N = 25
-        uvw = UVW(location=arrayCenter.earth_location,obstime=fixtime,phase=phase)
-        dirs_uvw = directions.transform_to(uvw)
-        factor300 = 300./dirs_uvw.w.value
+        
             
-        U,V = np.meshgrid(np.linspace(np.min(dirs_uvw.u.value*factor300),np.max(dirs_uvw.u.value*factor300),N),
-                          np.linspace(np.min(dirs_uvw.v.value*factor300),np.max(dirs_uvw.v.value*factor300),N))
+        
         D = interpNearest(dirs_uvw.u.value*factor300,dirs_uvw.v.value*factor300,dtec[i,0,:],U.flatten(),V.flatten()).reshape(U.shape)
         im = ax.imshow(D,origin='lower',extent=(np.min(U),np.max(U),np.min(V),np.max(V)),aspect='auto',
                       vmin = vmin, vmax= vmax,cmap=plt.cm.coolwarm,alpha=1.)
@@ -458,14 +467,15 @@ def plotDataPack(datapack,antIdx=-1,timeIdx=[0], dirIdx=-1,figname=None,vmin=Non
         plt.savefig("{}.png".format(figname),format='png')
     else:
         plt.show()
+    plt.close()
     
 def test_plotDataPack():
-    datapack = DataPack(filename="output/test/simulate/datapackSim_turbulent.hdf5")
+    datapack = DataPack(filename="output/test/datapackObs.hdf5")
     try:
         os.makedirs('output/test/plotDataPack')
     except:
         pass
-    plotDataPack(datapack,antIdx=-1,timeIdx=[0,1,2,3], dirIdx=-1,figname='output/test/plotDataPack/fig')
+    plotDataPack(datapack,antIdx=-1,timeIdx=[0,1,2,3], dirIdx=-1,figname=None)#'output/test/plotDataPack/fig')
 
 def test_prepareDataPack():
     dataPack = prepareDataPack('SB120-129/dtecData.hdf5',timeStart=0,timeEnd=-1,

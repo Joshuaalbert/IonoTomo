@@ -25,23 +25,25 @@ def animateTCISlices(TCI,outputFolder,numSeconds=10.):
     ax4 = fig.add_subplot(224)
     M = TCI.getShapedArray()
     if np.sum(M<0) > 0:
+        print("Using linear scaling")
         logSpacing = False
     else:
+        print("Using log scaling")
         logSpacing = True
         M[M==0] = np.min(M[M>0])
-    levels = []
+    levels = [np.min(M),np.max(M)]
     for q in np.linspace(1,99,15*5+2):
         if logSpacing:
             l = 10**np.percentile(np.log10(M),q)
-            if l not in levels:
+            if l not in levels and len(levels) < 15:
                 levels.append(l)
         else:
             l = np.percentile(M,q)
-            if l not in levels:
+            if l not in levels  and len(levels) < 15:
                 levels.append(l) 
-    
-    N = max(1,int((len(levels)-2)/13))
-    levels = [levels[0]] + levels[1:-1][::N] + [levels[-1]]
+    levels = np.sort(levels)
+    #N = max(1,int((len(levels)-2)/13))
+    #levels = [levels[0]] + levels[1:-1][::N] + [levels[-1]]
     print("plotting levels : {}".format(levels))
     #M[M<levels[0]] = np.nan
     #M[M>levels[-1]] = np.nan
@@ -134,6 +136,32 @@ def animateTCISlices(TCI,outputFolder,numSeconds=10.):
         ax4.cla()
         i += 1
     makeAnimation(outputFolder,prefix='fig',fps=int(TCI.nz/float(numSeconds)))
+    
+def animateDatapack(datapack,outputfolder, antIdx=-1,timeIdx=-1,dirIdx=-1):
+    from RealData import plotDataPack
+    try:
+        os.makedirs(outputfolder)
+    except:
+        pass
+    antennas,antennaLabels = datapack.get_antennas(antIdx = antIdx)
+    patches, patchNames = datapack.get_directions(dirIdx = dirIdx)
+    times,timestamps = datapack.get_times(timeIdx=timeIdx)
+    datapack.setReferenceAntenna(antennaLabels[0])
+    #plotDataPack(datapack,antIdx = antIdx, timeIdx = timeIdx, dirIdx = dirIdx,figname='{}/dobs'.format(outputfolder))
+    dobs = datapack.get_dtec(antIdx = antIdx, timeIdx = timeIdx, dirIdx = dirIdx)
+    vmin = np.percentile(dobs,1)
+    vmax = np.percentile(dobs,99)
+    Na = len(antennas)
+    Nt = len(times)
+    Nd = len(patches) 
+    j = 0
+    idx = 0
+    while j < Nt:
+        fig = "{}/fig-{:04d}".format(outputfolder,idx)
+        plotDataPack(datapack,antIdx=antIdx,timeIdx=[j,j+1], dirIdx=dirIdx,figname=fig,vmin=vmin,vmax=vmax)
+        idx += 1
+        j += 2
+    makeAnimation(outputFolder,prefix="fig".format(outputfolder),fps=int(5.))
             
 def test_animateTCISlices():
     from TricubicInterpolation import TriCubic
@@ -145,8 +173,14 @@ def test_animateTCISlices():
         pass
     animateTCISlices(TCI,"output/test/fig")
     
+def test_animateDatapack():
+    from RealData import DataPack
+    datapack = DataPack(filename="output/test/datapackObs.hdf5")
+    animateDatapack(datapack,"output/test/animateDatapack", antIdx=-1,timeIdx=-1,dirIdx=-1)
 if __name__ == '__main__':
-    test_animateTCISlices()
+    #test_animateTCISlices()
+    #test_animateDatapack()
+    makeAnimation("output/test/animateDatapack",prefix="fig",fps=int(5.))
     
 
 

@@ -36,8 +36,8 @@ def precondition(neTCI, datapack,antIdx=-1, dirIdx=-1, timeIdx = [0]):
     M = neTCI.getShapedArray()
     M *= 0
     M += 1.
-    M[heights > 450.] *= 0.
-    M[heights < 60.] *= 0.
+    M[heights > 450.] *= 0.01
+    M[heights < 60.] *= 0.01
     out = TriCubic(neTCI.xvec,neTCI.yvec, neTCI.zvec, M)
     return out
     L_pre = L_ne/2.

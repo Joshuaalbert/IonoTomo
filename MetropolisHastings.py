@@ -1,17 +1,20 @@
 
 # coding: utf-8
 
-# In[2]:
+# In[ ]:
 
 import dask.array as da
 import numpy as np
 from dask.dot import dot_graph
 #from dask.multiprocessing import get
+from dask import delayed
+from dask.distributed import Client
 from dask import get
 from functools import partial
 from time import sleep, clock
 from scipy.integrate import simps
 from scipy.special import gamma
+from functools import partial
 
 from dask.callbacks import Callback
 #from multiprocessing.pool import ThreadPool
@@ -27,7 +30,7 @@ from RealData import plotDataPack
 from PlotTools import animateTCISlices
 
 
-outputfolder = 'output/test/MH_5'
+outputfolder = 'output/test/MH_7'
 
 
 
@@ -66,9 +69,71 @@ def likelihood(g,dobs,CdCt):
     neglog = negloglike(g,dobs,CdCt)
     return np.exp(-neglog)
 
+def MHWalker(acceptanceGoal,walkerId,Nmax,mTCI,L_ne,sizeCell,i0, antIdx, dirIdx, timeIdx,
+             templateDatapack,rays,K_ne,dobs,CdCt,vmin,vmax,neTCI):
+    i = 1
+    accepted = 0
+    mAccepted = np.zeros([mTCI.m.size,Nmax],dtype=np.double)
+    m_i = mTCI.m.copy()
+    mAccepted[:,0] = m_i
+    mML = mTCI.m.copy()
+    g = forwardEquation(rays,K_ne,mTCI,i0)
+    Si = negloglike(g,dobs,CdCt)
+    Li = np.exp(-Si)
+    maxL = Li
+    #sampling
+    lvec = (np.fft.fftfreq(mTCI.nx,d=mTCI.xvec[1]-mTCI.xvec[0]))
+    mvec = (np.fft.fftfreq(mTCI.ny,d=mTCI.yvec[1]-mTCI.yvec[0]))
+    nvec = (np.fft.fftfreq(mTCI.nz,d=mTCI.zvec[1]-mTCI.zvec[0]))
+    L_,M_,N_ = np.meshgrid(lvec,mvec,nvec,indexing='ij')
+    R2 = L_**2 + M_**2 + N_**2
+    theta1 = np.log(1.5)
+    theta2 = L_ne
+    theta3 = 11./2.
+    omega = theta1*theta2**3/gamma(theta3) /np.pi**(3./2.) * (1. + theta2**2 *R2)**(-(theta3 + 3./2.))
+    np.sqrt(omega,out=omega)
+    V = (mTCI.xvec[-1]-mTCI.xvec[0])*(mTCI.yvec[-1]-mTCI.yvec[0])*(mTCI.zvec[-1]-mTCI.zvec[0])
+    omega /= V
+    while accepted < acceptanceGoal and i < Nmax:
+        #cycle = 1.05 + 1.2*np.cos((i%Ncycle)*np.pi/(Ncycle-1)/2.)
+        #theta1 = np.log(cycle)
+        dM = np.fft.fftn(np.random.normal(size=L_.shape))
+        dM *= omega
+        dM = np.fft.ifftn(dM).real.ravel('C')
+        dM *= theta1/np.max(dM)
+        mTCI.m = m_i + dM
+        g = forwardEquation(rays,K_ne,mTCI,i0)
+        Sj = negloglike(g,dobs,CdCt)
+        Lj = np.exp(-Sj)
+        if Sj < Si or np.log(np.random.uniform()) < Si - Sj:
+            mAccepted[:,i] += mTCI.m
+            templateDatapack.set_dtec(g,antIdx=antIdx,timeIdx=timeIdx,dirIdx = dirIdx)
+            templateDatapack.save("{}/g{}-{}.hdf5".format(outputfolder,walkerId,accepted))
+            plotDataPack(templateDatapack,antIdx=antIdx,timeIdx=timeIdx,dirIdx = dirIdx,
+            figname='{}/g{}-{}'.format(outputfolder,walkerId,accepted), vmin = vmin, vmax = vmax)#replace('hdf5','png'))
+            np.exp(mTCI.m, out=neTCI.m)
+            neTCI.m *= K_ne
+            neTCI.save("{}/m{}-{}.hdf5".format(outputfolder,walkerId,accepted))
+            Si = Sj
+            Li = Lj
+            accepted += 1
+        else:
+            mAccepted[:,i] += mAccepted[:,i-1]
+            mTCI.m -= dM
+        if Lj > maxL:
+            print("New max L = {}".format(Lj))
+            maxL = Lj
+            mML = mTCI.m.copy()
+        i += 1
+    mAccepted = mAccepted[:,:i]
+    if accepted == acceptanceGoal:
+        print("Converged in {} steps".format(i))
+    print("Acceptance: {}, rate : {}".format(accepted,float(accepted)/i))
+    return mAccepted
+    
+
 def metropolisHastings(binning,datapack,L_ne,sizeCell,i0, antIdx=-1, dirIdx=-1, timeIdx = [0]):
     print("Using output folder: {}".format(outputfolder))
-    import pylab as plt
     straightLineApprox = True
     tmax = 1000.
     antennas,antennaLabels = datapack.get_antennas(antIdx = antIdx)
@@ -112,70 +177,13 @@ def metropolisHastings(binning,datapack,L_ne,sizeCell,i0, antIdx=-1, dirIdx=-1, 
     mTCI.m /= K_ne
     np.log(mTCI.m,out=mTCI.m)
     templateDatapack = datapack.clone()
-    i = 1
-    accepted = 0
-    Nmax = int(1e3)
-    binning = 10
-    #1e9 is a GB
-    mAccepted = np.zeros([mTCI.m.size,Nmax],dtype=np.double)
-    m_i = mTCI.m.copy()
-    mAccepted[:,0] = m_i
-    mML = mTCI.m.copy()
-    g = forwardEquation_dask(rays,K_ne,mTCI,i0)
-    Si = negloglike(g,dobs,CdCt)
-    Li = np.exp(-Si)
-    maxL = Li
-    #sampling
-    lvec = (np.fft.fftfreq(mTCI.nx,d=mTCI.xvec[1]-mTCI.xvec[0]))
-    mvec = (np.fft.fftfreq(mTCI.ny,d=mTCI.yvec[1]-mTCI.yvec[0]))
-    nvec = (np.fft.fftfreq(mTCI.nz,d=mTCI.zvec[1]-mTCI.zvec[0]))
-    L_,M_,N_ = np.meshgrid(lvec,mvec,nvec,indexing='ij')
-    R2 = L_**2 + M_**2 + N_**2
-    theta1 = np.log(2/0.75)/2.
-    theta2 = L_ne
-    theta3 = 5./2.
-    omega = theta1*theta2**3/gamma(theta3) /np.pi**(3./2.) * (1. + theta2**2 *R2)**(-(theta3 + 3./2.))
-    np.sqrt(omega,out=omega)
-    V = (mTCI.xvec[-1]-mTCI.xvec[0])*(mTCI.yvec[-1]-mTCI.yvec[0])*(mTCI.zvec[-1]-mTCI.zvec[0])
-    omega /= V
-    Ncycle = 10
-    while accepted < binning**2 and i < Nmax:
-        cycle = 1.05 + 1.2*np.cos((i%Ncycle)*np.pi/(Ncycle-1)/2.)
-        theta1 = np.log(cycle)
-        dM = np.fft.fftn(np.random.normal(size=L_.shape))
-        dM *= omega
-        dM = np.fft.ifftn(dM).real.ravel('C')
-        dM *= theta1/np.max(dM)
-        mTCI.m += dM
-        g = forwardEquation_dask(rays,K_ne,mTCI,i0)
-        Sj = negloglike(g,dobs,CdCt)
-        Lj = np.exp(-Sj)
-        if Sj < Si or np.log(np.random.uniform()) < Si - Sj:
-            mAccepted[:,i] += mTCI.m
-            print("Accepted, Si {}, Sj {}".format(Si,Sj))
-            templateDatapack.set_dtec(g,antIdx=antIdx,timeIdx=timeIdx,dirIdx = dirIdx)
-            templateDatapack.save("{}/g{}.hdf5".format(outputfolder,accepted))
-            plotDataPack(templateDatapack,antIdx=antIdx,timeIdx=timeIdx,dirIdx = dirIdx,
-            figname='{}/g{}'.format(outputfolder,accepted), vmin = vmin, vmax = vmax)#replace('hdf5','png'))
-            np.exp(mTCI.m, out=neTCI.m)
-            neTCI.m *= K_ne
-            neTCI.save("{}/m{}.hdf5".format(outputfolder,accepted))
-            Si = Sj
-            Li = Lj
-            accepted += 1
-        else:
-            mAccepted[:,i] += mAccepted[:,i-1]
-            print("Rejected, Si {}, Sj {}".format(Si,Sj))
-            mTCI.m -= dM
-        if Lj > maxL:
-            maxL = Lj
-            print("New maxL: {}".format(maxL))
-            mML = mTCI.m.copy()
-        i += 1
-    if accepted == binning**2:
-        print("Converged in {} steps".format(i))
-    print("Acceptance: {}, rate : {}".format(accepted,float(accepted)/i))
-    mAccepted = mAccepted[:,:i]
+    numWalkers = 6
+    dsk = {"MHWalker-{}".format(id): (MHWalker,binning**2,id,int(1000),mTCI,
+                                     L_ne,sizeCell,i0, antIdx, dirIdx, timeIdx,templateDatapack,rays,
+                                     K_ne,dobs,CdCt,vmin,vmax,neTCI) for id in range(numWalkers)}
+    
+    client = Client()
+    modelledAccepted = np.concatenate(client.get(dsk,["MHWalker-{}".format(id) for id in range(numWalkers)]),axis=1)
     meanModel = np.mean(mAccepted,axis=1)
     mTCI.m = meanModel
     np.exp(mTCI.m, out=neTCI.m)
@@ -205,15 +213,18 @@ if __name__ == '__main__':
     from AntennaFacetSelection import selectAntennaFacets
     #from InitialModel import createTurbulentlModel
     i0 = 0
-    datapack = DataPack(filename="output/test/datapackObs.hdf5")
+    datapack = DataPack(filename="output/test/simulate/simulate_0/datapackSim.hdf5")
     #flags = datapack.findFlaggedAntennas()
     #datapack.flagAntennas(flags)
-    datapackSel = selectAntennaFacets(16, datapack, antIdx=-1, dirIdx=-1, timeIdx = np.arange(4))
+    datapackSel = selectAntennaFacets(15, datapack, antIdx=-1, dirIdx=-1, timeIdx = np.arange(1))
     #pertTCI = createTurbulentlModel(datapackSel,antIdx = -1, timeIdx = -1, dirIdx = -1, zmax = 1000.)
-    L_ne = 50.
+    L_ne = 100.
     sizeCell = 5.
-    
-    metropolisHastings(25,datapackSel,L_ne,sizeCell,i0, antIdx=-1, dirIdx=-1, timeIdx = np.arange(4))  
+    #metropolisHastings(25,datapackSel,L_ne,sizeCell,i0, antIdx=-1, dirIdx=-1, timeIdx = np.arange(1))  
+    m = TriCubic(filename='output/test/MH_6/m0-3.hdf5')
+    neTCI = createInitialModel(datapack,antIdx = antIdx, timeIdx = timeIdx, dirIdx = dirIdx, zmax = tmax,spacing=sizeCell)
+    m.m -=
+    animateTCISlices(m,"output/test/MH_6/m0-3-fig",numSeconds=20.)
 
 
 # In[ ]:

@@ -11,10 +11,10 @@ from scipy.special import gamma
 from UVWFrame import UVW
 from IRI import aPrioriModel
 from TricubicInterpolation import TriCubic
+from Covariance import CovarianceClass
 
-def determineInversionDomain(spacing,antennas, directions, pointing, zmax, padding = 5):
+def determineInversionDomain(spacing,antennas, directions, pointing, zmax, padding = 20):
     '''Determine the domain of the inversion'''
-    import astropy.units as au
     ants = antennas.transform_to(pointing).cartesian.xyz.to(au.km).value.transpose()
     dirs = directions.transform_to(pointing).cartesian.xyz.value.transpose()
     #old
@@ -38,34 +38,13 @@ def determineInversionDomain(spacing,antennas, directions, pointing, zmax, paddi
     print("Found domain u in {}..{}, v in {}..{}, w in {}..{}".format(umin,umax,vmin,vmax,wmin,wmax))
     return uvec,vvec,wvec
 
-def turbulentPerturbation(TCI,theta1 = 3.,theta2 = 20., theta3 = 5./2.):    
-    #omega = theta1*theta2**n/gamma(theta3) /np.pi**(n/2.) * (1. + theta2**2 *r**2)**(-(theta3 + n/2.))
-    B = np.random.normal(size=[TCI.nx,TCI.ny,TCI.nz])
-    A = np.fft.fftn(B)
-    lvec = (np.fft.fftfreq(TCI.nx,d=TCI.xvec[1]-TCI.xvec[0]))
-    mvec = (np.fft.fftfreq(TCI.ny,d=TCI.yvec[1]-TCI.yvec[0]))
-    nvec = (np.fft.fftfreq(TCI.nz,d=TCI.zvec[1]-TCI.zvec[0]))
-    L_,M_,N_ = np.meshgrid(lvec,mvec,nvec,indexing='ij')
-    #r^2
-    omega = L_**2
-    omega += M_**2
-    omega += N_**2
-    #np.sqrt(omega, out=omega)
-    #theta1
-    omega *= theta2**2
-    omega += 1.
-    np.power(omega,-(theta3 + 3./2.),out=omega)
-    omega *= theta1*theta2**3/(gamma(theta3)*np.pi**(3./2.))
-    np.sqrt(omega,out=omega)
-    V = (TCI.xvec[-1] - TCI.xvec[0])*(TCI.yvec[-1] - TCI.yvec[0])*(TCI.zvec[-1] - TCI.zvec[0])
-    omega /= V
-    A *= omega
-    B = np.fft.ifftn(A).real
-    B *= theta1/np.max(B)
+def turbulentPerturbation(TCI,sigma = 3.,corr = 20., nu = 5./2.):    
+    covC = CovarianceClass(TCI,sigma,corr,nu)
+    B = covC.realization()
     return B
     
 
-def createInitialModel(datapack,antIdx = -1, timeIdx = -1, dirIdx = -1, zmax = 1000.,spacing=5.):
+def createInitialModel(datapack,antIdx = -1, timeIdx = -1, dirIdx = -1, zmax = 1000.,spacing=5.,padding=20):
     antennas,antennaLabels = datapack.get_antennas(antIdx = antIdx)
     patches, patchNames = datapack.get_directions(dirIdx=dirIdx)
     times,timestamps = datapack.get_times(timeIdx=timeIdx)
@@ -83,7 +62,7 @@ def createInitialModel(datapack,antIdx = -1, timeIdx = -1, dirIdx = -1, zmax = 1
     zenith = datapack.radioArray.getSunZenithAngle(fixtime)
     print("Sun at zenith angle {}".format(zenith))
     print("Creating ionosphere model...")
-    xvec,yvec,zvec = determineInversionDomain(spacing,antennas, patches,uvw, zmax, padding = 20)
+    xvec,yvec,zvec = determineInversionDomain(spacing,antennas, patches,uvw, zmax, padding = padding)
     X,Y,Z = np.meshgrid(xvec,yvec,zvec,indexing='ij')
     print("Nx={} Ny={} Nz={} number of cells: {}".format(len(xvec),len(yvec),len(zvec),np.size(X)))
     coords = ac.SkyCoord(X.flatten()*au.km,Y.flatten()*au.km,Z.flatten()*au.km,frame=uvw).transform_to('itrs').earth_location.to_geodetic('WGS84')
@@ -94,7 +73,7 @@ def createInitialModel(datapack,antIdx = -1, timeIdx = -1, dirIdx = -1, zmax = 1
 
 def createTurbulentlModel(datapack,antIdx = -1, timeIdx = -1, dirIdx = -1, zmax = 1000., spacing=5.):
     neTCI = createInitialModel(datapack,antIdx = antIdx, timeIdx = timeIdx, dirIdx = dirIdx, zmax = zmax, spacing= spacing)
-    dM = turbulentPerturbation(neTCI,theta1=np.log(5/0.5)/2.,theta2=50.,theta3=11./2.)
+    dM = turbulentPerturbation(neTCI,sigma=np.log(5.),corr=25.,nu=7./2.)
     pertTCI = TriCubic(neTCI.xvec,neTCI.yvec,neTCI.zvec,neTCI.getShapedArray()*np.exp(dM))
     return pertTCI
     
@@ -115,8 +94,8 @@ def test_createTurbulentModel():
             os.makedirs("output/test/InitialModel/turbulent-{}/fig".format(i))
         except:
             pass
-        neTCI.save("output/test/InitialModel/turbulent-{}/neModelTurbulent.hdf5".format(i))
-        animateTCISlices(neTCI,"output/test/InitialModel/turbulent-{}/fig".format(i))
+        #neTCI.save("output/test/InitialModel/turbulent-{}/neModelTurbulent.hdf5".format(i))
+        #animateTCISlices(neTCI,"output/test/InitialModel/turbulent-{}/fig".format(i))
     
 if __name__ == '__main__':
     #test_createInitialModel()
