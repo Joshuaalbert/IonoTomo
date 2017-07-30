@@ -1,0 +1,10 @@
+numpy
+h5py
+glib
+matplotlib
+jupyter
+ipython
+yaml
+pyyaml
+scipy
+astropy
