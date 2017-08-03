@@ -5,14 +5,18 @@ import numpy as np
 import sys
 
 import os
+import logging as log
+import pkgutil
 
 class RadioArray(object):
     '''Handles the radio array object.'''
-    lofar_array = os.path.join(os.path.dirname(__file__),'arrays/lofar.hba.antenna.cfg')
-    lofar_cycle0_array = os.path.join(os.path.dirname(__file__),'arrays/lofar.cycle0.hba.antenna.cfg')
-    gmrt_array = os.path.join(os.path.dirname(__file__),'arrays/gmrtPos.csv')
+    _arrays = os.path.dirname(sys.modules["ionotomo.astro"].__file__)
+    lofar_array = os.path.join(_arrays,'arrays/lofar.hba.antenna.cfg')
+    lofar_cycle0_array = os.path.join(_arrays,'arrays/lofar.cycle0.hba.antenna.cfg')
+    gmrt_array = os.path.join(_arrays,'arrays/gmrtPos.csv')
+
     
-    def __init__(self,array_file = None,antenna_pos=None,name = None,msFile=None,numAntennas=0,earthLocs=None,frequency=120e6):
+    def __init__(self,array_file = None,antenna_pos=None,name = None,msFile=None,num_antennas=0,earth_locs=None,frequency=120e6,**kwargs):
         self.frequency = frequency#can be widebandwidth later
         self.Nantenna = 0
         if array_file is not None:
@@ -29,21 +33,21 @@ class RadioArray(object):
                              'formats':[np.double,np.double,np.double,np.double,'S16']})
             d = np.genfromtxt(array_file,comments = '#',dtype=types)
             self.diameters = d['diameter']
-            self.labels = d['station_label'].astype(str)
+            self.labels = np.array(d['station_label'].astype(str))
             self.locs = ac.SkyCoord(x=d['X']*au.m,y=d['Y']*au.m,z=d['Z']*au.m,frame='itrs')
             self.Nantenna = int(np.size(d['X']))
         except:
             d = np.genfromtxt(array_file,comments = '#',usecols=(0,1,2))
             self.locs = ac.SkyCoord(x=d[:,0]*au.m,y=d[:,1]*au.m,z=d[:,2]*au.m,frame='itrs')
             self.Nantenna = d.shape[0]
-            self.labels = [str(i) for i in range(self.Nantenna)]
+            self.labels = np.array(["ant{:02d}".format(i) for i in range(self.Nantenna)])
             self.diameters = None
         self.calc_center()
     
     def get_antenna_locs(self):
         return self.locs
     def get_antenna_labels(self):
-        return self.labels
+        return np.array(self.labels)
         
     def get_fov(self):
         '''get the field of view in radians'''
@@ -117,12 +121,19 @@ class RadioArray(object):
     def __repr__(self):
         return "Radio Array: {0:1.5e} MHz, Longitude {1:.2f} Latitude {2:.2f} Height {3:.2f}".format(self.frequency,*self.get_center().earth_location.to_geodetic('WGS84'))
 
-def generate_example_radio_array(Nant=10):
-    radio_array = RadioArray()
-    location = [np.random.uniform(low=0,high=2*np.pi),np.random.uniform(low=-np.pi/3., high = np.pi/3.)]
-    scatter = [20./6371.]*2
-    ant_pos = np.random.multivariate_normal(mean=location,cov=np.diag(scatter)**2,size=Nant)
-    ant_pos = ac.EarthLocation.from_geodetic(ant_pos[:,0]*au.rad,ant_pos[:,1]*au.rad,np.zeros(Nant)*au.m,"WGS84").to_geocentric()
-    ant_pos = np.array([ant_pos[0].si.value,ant_pos[1].si.value,ant_pos[2].si.value]).T
-    radio_array.load_pos_array(ant_pos)
+def generate_example_radio_array(Nant=10,config=None,**kwargs):
+    if config is not None:
+        if config == 'lofar':
+            radio_array = RadioArray(array_file=RadioArray.lofar_array,**kwargs)
+        else:
+            log.debug("invalid array config {}".format(config))
+            return None
+    else:
+        radio_array = RadioArray(**kwargs)
+        location = [np.random.uniform(low=0,high=2*np.pi),np.random.uniform(low=-np.pi/3., high = np.pi/3.)]
+        scatter = [40./6371.]*2
+        ant_pos = np.random.multivariate_normal(mean=location,cov=np.diag(scatter)**2,size=Nant)
+        ant_pos = ac.EarthLocation.from_geodetic(ant_pos[:,0]*au.rad,ant_pos[:,1]*au.rad,np.zeros(Nant)*au.m,"WGS84").to_geocentric()
+        ant_pos = np.array([ant_pos[0].si.value,ant_pos[1].si.value,ant_pos[2].si.value]).T
+        radio_array.load_pos_array(ant_pos)
     return radio_array 

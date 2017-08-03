@@ -25,7 +25,7 @@ from tri_cubic import TriCubic
 from LineSearch import line_search
 from InfoCompleteness import precondition
 from InitialModel import create_initial_model
-from CalcRays import calcRays,calcRays_dask
+from CalcRays import calc_rays,calc_rays_dask
 from real_data import plot_datapack
 from PlotTools import animate_tci_slices
 from Covariance import Covariance
@@ -250,7 +250,7 @@ def create_bfgs_dask(resettable,output_folder,N,datapack,L_ne,size_cell,i0, ant_
     #make uniform
     #ne_tci.m[:] = np.mean(ne_tci.m)
     ne_tci.save("{}/nePriori.hdf5".format(output_folder))
-    rays = calcRays(antennas,patches,times, array_center, fixtime, phase, ne_tci, datapack.radio_array.frequency, 
+    rays = calc_rays(antennas,patches,times, array_center, fixtime, phase, ne_tci, datapack.radio_array.frequency, 
                     straight_line_approx, tmax, ne_tci.nz)
     m_tci = ne_tci.copy()
     K_ne = np.mean(m_tci.m)
@@ -331,7 +331,7 @@ def create_bfgs_dask(resettable,output_folder,N,datapack,L_ne,size_cell,i0, ant_
     dsk['size_cell'] = size_cell
     dsk['cov_obj'] = cov_obj
     #calc rays
-    #dsk['rays'] = (calcRays_dask,'antennas','patches','times', 'array_center', 'fixtime', 'phase', 'ne_tci', 'frequency',  'straight_line_approx','tmax')
+    #dsk['rays'] = (calc_rays_dask,'antennas','patches','times', 'array_center', 'fixtime', 'phase', 'ne_tci', 'frequency',  'straight_line_approx','tmax')
     dsk['rays'] = rays
     dsk['output_folder'] = output_folder
     dsk['resettable'] = resettable
@@ -358,7 +358,7 @@ class TrackingCallbacks(Callback):
     
 if __name__=='__main__':
     from real_data import DataPack
-    from AntennaFacetSelection import selectAntennaFacets
+    from AntennaFacetSelection import select_antennas_facets
     from dask.diagnostics import Profiler, ResourceProfiler, CacheProfiler
     from dask.diagnostics import visualize
     #from InitialModel import createTurbulentlModel
@@ -367,8 +367,8 @@ if __name__=='__main__':
     #datapack = DataPack(filename="output/test/datapack_obs.hdf5")
     #flags = datapack.find_flagged_antennas()
     #datapack.flag_antennas(flags)
-    datapack_sel = selectAntennaFacets(20, datapack, ant_idx=-1, dir_idx=-1, time_idx = np.arange(1))
-    #pertTCI = createTurbulentlModel(datapack_sel,ant_idx = -1, time_idx = -1, dir_idx = -1, zmax = 1000.)
+    datapack_sel = select_antennas_facets(20, datapack, ant_idx=-1, dir_idx=-1, time_idx = np.arange(1))
+    #pert_tci = createTurbulentlModel(datapack_sel,ant_idx = -1, time_idx = -1, dir_idx = -1, zmax = 1000.)
     L_ne = 25.
     size_cell = 5.
     dsk = create_bfgs_dask(True, "output/test/bfgs_3_1", 25,datapack_sel,L_ne,size_cell,i0, ant_idx=-1, dir_idx=-1, time_idx = np.arange(1))

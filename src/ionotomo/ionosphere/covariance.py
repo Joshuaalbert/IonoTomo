@@ -4,7 +4,7 @@ from scipy.special import gamma
 
 class Covariance(object):
     '''Use for repeated use of covariance.
-    `TCI` : `tomoiono.geometry.tri_cubic.TriCubic`
+    `tci` : `tomoiono.geometry.tri_cubic.TriCubic`
         TricubicCubic interpolator that contains the geometry of the volume
     `sigma` : `float`
     variance of diagonal terms (sigma_1)
@@ -14,20 +14,20 @@ class Covariance(object):
         smoothness parameter 1./2. results in exponential, 3./2. to 7./2. more 
         smooth realistic ionosphere, as nu -> inf it approaches 
         square-exponential covariance (too smooth to be real)'''
-    def __init__(self,TCI,sigma,corr,nu):
+    def __init__(self,tci,sigma,corr,nu):
         self.sigma = sigma
         self.corr = corr
         self.nu = nu
-        self.nx = TCI.nx
-        self.ny = TCI.ny
-        self.nz = TCI.nz
-        self.dx = TCI.xvec[1] - TCI.xvec[0]
-        lvec = np.fft.fftfreq(TCI.nx,d=self.dx)
-        self.dy = TCI.yvec[1] - TCI.yvec[0]
-        mvec = np.fft.fftfreq(TCI.ny,d=self.dy)
-        self.dz = TCI.zvec[1] - TCI.zvec[0]
+        self.nx = tci.nx
+        self.ny = tci.ny
+        self.nz = tci.nz
+        self.dx = tci.xvec[1] - tci.xvec[0]
+        lvec = np.fft.fftfreq(tci.nx,d=self.dx)
+        self.dy = tci.yvec[1] - tci.yvec[0]
+        mvec = np.fft.fftfreq(tci.ny,d=self.dy)
+        self.dz = tci.zvec[1] - tci.zvec[0]
         self.dV = self.dx*self.dy*self.dz
-        nvec = np.fft.fftfreq(TCI.nz,d=self.dz)
+        nvec = np.fft.fftfreq(tci.nz,d=self.dz)
         L,M,N = np.meshgrid(lvec,mvec,nvec,indexing='ij')
         self.r = L**2
         self.r += M**2

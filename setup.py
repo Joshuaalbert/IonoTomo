@@ -16,7 +16,7 @@ setup(name='ionotomo',
     tests_require=[
         'pytest>=2.8',
     ],
-    package_data=["ionotomo.astro.arrays/*"]
+    package_data={"ionotomo.astro":["arrays/*"]},
     package_dir = {'':'src'},
       packages=find_packages('src')
      )

@@ -13,11 +13,13 @@ except:
     except:
         print("Unable to import mayavi")
 
-from ionotomo.astro.real_data import plot_datapack
 from ionotomo.geometry.tri_cubic import TriCubic
+from ionotomo.astro.frames.uvw_frame import UVW
 import numpy as np
 import pylab as plt
-
+import astropy.coordinates as ac
+import astropy.time as at
+import astropy.units as au
 ## utility functions
 
 def interp_nearest(x,y,z,x_,y_):
@@ -152,7 +154,7 @@ def animate_tci_slices(TCI,output_folder,num_seconds=10.):
         j2 = (TCI.ny - 1) - int(i/float(TCI.nz)*TCI.ny)
         #j2 = TCI.ny >> 1
         xz = M[:,j2,:].transpose()#x by z
-              im = ax2.imshow(xy,origin='lower',vmin=vmin,vmax=vmax,aspect = 'auto',
+        im = ax2.imshow(xy,origin='lower',vmin=vmin,vmax=vmax,aspect = 'auto',
                         extent=[TCI.xvec[0],TCI.xvec[-1],TCI.yvec[0],TCI.yvec[-1]],cmap=plt.cm.bone)
         CS = ax2.contour(xy, levels,
                      origin='lower',

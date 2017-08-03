@@ -72,7 +72,7 @@ def precondition(ne_tci, datapack,ant_idx=-1, dir_idx=-1, time_idx = [0]):
 def test_precondition():
     from time import clock
     datapack = DataPack(filename="output/simulated/dataobs.hdf5").clone()
-    ne_tci = TriCubic(filename="output/simulated/neModel-0.hdf5").copy()
+    ne_tci = TriCubic(filename="output/simulated/ne_model-0.hdf5").copy()
     antennas,antenna_labels = datapack.get_antennas(ant_idx = -1)
     patches, patch_names = datapack.get_directions(dir_idx=-1)
     times,timestamps = datapack.get_times(time_idx=[0])

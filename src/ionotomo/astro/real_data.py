@@ -7,21 +7,22 @@ import astropy.coordinates as ac
 import h5py
 import os
 import pylab as plt
-
+from time import gmtime, strftime
 from ionotomo.astro.radio_array import *
 from ionotomo.astro.frames.uvw_frame import UVW
 from ionotomo.astro.frames.pointing_frame import Pointing
 
 
-def get_datum_idx(ant_idx,time_idx,dir_idx,numAnt,numTimes):
+
+def get_datum_idx(ant_idx,time_idx,dir_idx,num_ant,num_time):
     '''standarizes indexing'''
-    idx = ant_idx + numAnt*(time_idx + numTimes*dir_idx)
+    idx = ant_idx + num_ant*(time_idx + num_time*dir_idx)
     return idx
 
-def get_datum(datum_idx,numAnt,numTimes):
-    ant_idx = datum_idx % numAnt
-    time_idx = (datum_idx - ant_idx)/numAnt % numTimes
-    dir_idx = (datum_idx - ant_idx - numAnt*time_idx)/numAnt/numTimes
+def get_datum(datum_idx,num_ant,num_time):
+    ant_idx = datum_idx % num_ant
+    time_idx = (datum_idx - ant_idx)/num_ant % num_time
+    dir_idx = (datum_idx - ant_idx - num_ant*time_idx)/num_ant/num_time
     return ant_idx,time_idx,dir_idx
 
 class DataPack(object):
@@ -43,7 +44,7 @@ class DataPack(object):
         #print("Loaded {0} antennas, {1} times, {2} directions".format(self.Na,self.Nt,self.Nd))
     
     def __repr__(self):
-        return "DataPack: numAntennas = {}, numTimes = {}, numDirections = {}\nReference Antenna = {}".format(self.Na,self.Nt,self.Nd,self.ref_ant)
+        return "DataPack: num_antennas = {}, num_time = {}, num_directions = {}\nReference Antenna = {}".format(self.Na,self.Nt,self.Nd,self.ref_ant)
     def clone(self):
         datapack = DataPack({'radio_array':self.radio_array, 'antennas':self.antennas, 'antenna_labels':self.antenna_labels,
                         'times':self.times, 'timestamps':self.timestamps, 'directions':self.directions,
@@ -106,6 +107,9 @@ class DataPack(object):
         self.Na = len(self.antennas)
         self.Nt = len(self.times)
         self.Nd = len(self.directions)
+        self.antenna_labels = np.array(self.antenna_labels)
+        self.patch_names = np.array(self.patch_names)
+        self.timestamps = np.array(self.timestamps)
                 
     def set_dtec(self,dtec,ant_idx=[],time_idx=[], dir_idx=[],ref_ant=None):
         '''Set the specified dtec solutions corresponding to the requested indices.
@@ -175,12 +179,12 @@ class DataPack(object):
         ant_idx = np.sort(ant_idx)
         output = self.antennas[ant_idx]
         Na = len(ant_idx)
-        outputLabels = []
+        output_labels = []
         i = 0
         while i < Na:
-            outputLabels.append(self.antenna_labels[ant_idx[i]])
+            output_labels.append(self.antenna_labels[ant_idx[i]])
             i += 1
-        return output, outputLabels
+        return output, output_labels
     
     def get_times(self,time_idx=[]):
         '''Get the gps times'''
@@ -189,12 +193,12 @@ class DataPack(object):
         time_idx = np.sort(time_idx)
         output = self.times[time_idx]
         Nt = len(time_idx)
-        outputLabels = []
+        output_labels = []
         j = 0
         while j < Nt:
-            outputLabels.append(self.timestamps[time_idx[j]])
+            output_labels.append(self.timestamps[time_idx[j]])
             j += 1
-        return output, outputLabels
+        return output, output_labels
     
     def get_directions(self, dir_idx=[]):
         '''Get the array of directions in itrs'''
@@ -203,12 +207,12 @@ class DataPack(object):
         dir_idx = np.sort(dir_idx)
         output = self.directions[dir_idx]
         Nd = len(dir_idx)
-        outputLabels = []
+        output_labels = []
         k = 0
         while k < Nd:
-            outputLabels.append(self.patch_names[dir_idx[k]])
+            output_labels.append(self.patch_names[dir_idx[k]])
             k += 1
-        return output, outputLabels
+        return output, output_labels
     
     def set_reference_antenna(self,ref_ant):
         if ref_ant is None:
@@ -226,9 +230,9 @@ class DataPack(object):
         self.dtec = self.dtec - self.dtec[ref_ant_idx,:,:]
         
     def get_center_direction(self):
-        raMean = np.mean(self.directions.transform_to('icrs').ra)
-        decMean = np.mean(self.directions.transform_to('icrs').dec)
-        phase = ac.SkyCoord(raMean,decMean,frame='icrs')
+        ra_mean = np.mean(self.directions.transform_to('icrs').ra)
+        dec_mean = np.mean(self.directions.transform_to('icrs').dec)
+        phase = ac.SkyCoord(ra_mean,dec_mean,frame='icrs')
         return phase
 
     def find_flagged_antennas(self):
@@ -303,25 +307,61 @@ class DataPack(object):
         self.dtec = self.dtec[:,mask,:]
         self.Nt = len(self.times)        
 
-
-def generate_example_datapack(Nant = 10, Ntime = 1, Ndir = 10):
-    radio_array = generate_example_radio_array(Nant=Nant)
+def generate_example_datapack(Nant = 10, Ntime = 1, Ndir = 10, fov = 4., alt = 90., az=0., time = None, radio_array=None):
+    if radio_array is None:
+        radio_array = generate_example_radio_array(Nant=Nant)
+    if time is None:
+        time = at.Time(strftime("%Y-%m-%dT%H:%M:%S",gmtime()),format='isot')
+    else:
+        if isinstance(time,str):
+            time = at.Time(time,format='isot')
     antennas = radio_array.get_antenna_locs()
     antenna_labels = radio_array.get_antenna_labels()
-    t0 = at.Time("2017-12-25T00:00:00.000",format='isot').gps
-    times = at.Time(np.arange(Ntime)*8. + t0, format='gps')
-    
-    location = [np.random.uniform(low=0,high=360),np.random.uniform(low=-60., high = 60.)]
-    scatter = [4.]*2
-    dirs = np.random.multivariate_normal(mean=location,cov=np.diag(scatter)**2,size=Ndir)
-    
-    dirs = ac.SkyCoord(ra=dirs[:,0]*au.deg, dec=dirs[:,1]*au.deg,frame='icrs')
+    Nant = len(antennas)
+    times = at.Time(np.arange(Ntime)*8. + time.gps, format='gps')
+    phase = ac.AltAz(alt=alt*au.deg,az=az*au.deg,location=radio_array.get_center(),obstime=time).transform_to(ac.ICRS)
+    uvw = UVW(location = radio_array.get_center(),obstime=time,phase=phase)
+    phi = np.random.uniform(low=-fov/2.,high=fov/2.,size=Ndir)*np.pi/180.
+    theta = np.random.uniform(low=0,high=360.,size=Ndir)*np.pi/180.
+    dirs = np.array([np.cos(theta)*np.sin(phi),np.sin(theta)*np.sin(phi),np.cos(phi)]).T
+    dirs = ac.SkyCoord(u = dirs[:,0], v = dirs[:,1], w = dirs[:,2],frame=uvw).transform_to(ac.ICRS)
     patch_names = np.array(["facet_patch_{}".format(i) for i in range(Ndir)])
     
-    dtec = np.zeros([Nant,Ntime,Ndir],dtype=np.double)
+    dtec = np.random.normal(size=[Nant,Ntime,Ndir])
     data_dict = {'radio_array':radio_array,'antennas':antennas,'antenna_labels':antenna_labels,
                     'times':times,'timestamps':times.isot,
                     'directions':dirs,'patch_names':patch_names,'dtec':dtec}
     datapack = DataPack(data_dict=data_dict)
+    datapack.set_reference_antenna(antenna_labels[0])
+    return datapack
 
+
+def phase_screen_datapack(N,Nant = 10, Ntime = 1, fov = 4., alt = 90., az=0., time = None, radio_array=None,datapack=None):
+    if datapack is None:
+        datapack = generate_example_datapack(Nant = Nant, Ntime = Ntime, Ndir = 1, fov = fov, alt = alt, az=az, time = time, radio_array=radio_array)
+    antennas,antenna_labels = datapack.get_antennas(ant_idx = -1)
+    times,timestamps = datapack.get_times(time_idx=-1)
+    Na = len(antennas)
+    Nt = len(times)
+    fixtime = times[Nt>>1]
+    phase = datapack.get_center_direction()
+    array_center = datapack.radio_array.get_center()
+    uvw = UVW(location = datapack.radio_array.get_center(),obstime=time,phase=phase)
+    uvec = np.linspace(-fov/2.,fov/2.,N)*np.pi/180.
+    dirs = []
+    for theta1 in uvec:
+        for theta2 in uvec:
+            dir = np.array([np.sin(theta1),np.sin(theta2),1.])
+            dir /= np.linalg.norm(dir)
+            dirs.append(dir)
+    dirs = np.array(dirs)
+    dirs = ac.SkyCoord(u = dirs[:,0], v = dirs[:,1], w = dirs[:,2],frame=uvw).transform_to(ac.ICRS)
+    patch_names = np.array(["facet_patch_{}".format(i) for i in range(len(dirs))])
+    
+    dtec = np.random.normal(size=[Na,Nt,len(dirs)])
+    data_dict = {'radio_array':datapack.radio_array,'antennas':antennas,'antenna_labels':antenna_labels,
+                    'times':times,'timestamps':times.isot,
+                    'directions':dirs,'patch_names':patch_names,'dtec':dtec}
+    datapack = DataPack(data_dict=data_dict)
+    datapack.set_reference_antenna(antenna_labels[0])
     return datapack

@@ -1,77 +1,54 @@
-
-# coding: utf-8
-
-# In[ ]:
-
 import numpy as np
 from scipy.integrate import odeint
-from TricubicInterpolation import TriCubic
+from ionotomo.geometry.tri_cubic import TriCubic
 
 class Fermat(object):
-    def __init__(self,neTCI=None,frequency = 120e6,type='s',straightLineApprox=True):
+    def __init__(self,ne_tci,frequency = 120e6,type='z',straight_line_approx=True):
         '''Fermat principle. type = "s" means arch length is the indepedent variable
         type="z" means z coordinate is the independent variable.'''
         self.type = type
         self.frequency = frequency#Hz
-        self.straightLineApprox = straightLineApprox
-        if neTCI is not None:
-            self.ne2n(neTCI)  
-            return
+        self.straight_line_approx = straight_line_approx
+        self.ne_tci = ne_tci
+    @property
+    def ne_tci(self):
+        return self._ne_tci
+    @ne_tci.setter
+    def ne_tci(self,tci):
+        self._ne_tci = tci
+        self.n_tci = self.ne2n(tci)
+    @property
+    def n_tci(self):
+        return self._n_tci
+    @n_tci.setter
+    def n_tci(self,tci):
+        self._n_tci = tci
+        #nx, ny, nz, nxx, nxy, nxz, nyy, nyz, nxyz
+        M = tci.M
+        Mx = np.rollaxis(np.rollaxis(M[1:,:,:] - M[:-1,:,:],0,3)/(tci.xvec[1:] - tci.xvec[:-1]),2,0)
+        My = np.rollaxis(np.rollaxis(M[:,1:,:] - M[:,:-1,:],1,3)/(tci.yvec[1:] - tci.yvec[:-1]),2,1)
+        Mz = (M[:,:,1:] - M[:,:,:-1])/(tci.zvec[1:] - tci.zvec[:-1])
         
-    def loadFunc(self,file):
-        '''Load the model given in `file`'''
-        data = np.load(file)
-        if 'ne' in data.keys():
-            ne = data['ne']
-            xvec = data['xvec']
-            yvec = data['yvec']
-            zvec = data['zvec']
-            self.ne2n(TriCubic(xvec,yvec,zvec,ne,useCache=True))
-            return
-        if 'n' in data.keys():
-            ne = data['n']
-            xvec = data['xvec']
-            yvec = data['yvec']
-            zvec = data['zvec']
-            self.n2ne(TriCubic(xvec,yvec,zvec,n,useCache=True))
-            return
-    
-    def saveFunc(self,file):
-        np.savez(file,xvec=self.nTCI.xvec,yvec=self.nTCI.yvec,zvec=self.nTCI.zvec,n=self.nTCI.m,ne=self.neTCI.m)
-            
-    def ne2n(self,neTCI):
+    def ne2n(self,ne_tci):
         '''Analytically turn electron density to refractive index. Assume ne in m^-3'''
-        self.neTCI = neTCI
         #copy object
-        self.nTCI = neTCI.copy(default=1.)
+        n_tci = ne_tci.copy()
         #inplace change to refractive index
-        self.nTCI.m *= -8.980**2/self.frequency**2
-        self.nTCI.m += 1.
-        self.nTCI.m = np.sqrt(self.nTCI.m)
+        n_tci.M *= -8.980**2/self.frequency**2
+        n_tci.M += 1.
+        np.sqrt(n_tci.M,out=n_tci.M)
         #wp = 5.63e4*np.sqrt(ne/1e6)/2pi#Hz^2 m^3 lightman p 226
-        return self.nTCI
-    
-    def n2ne(self,nTCI):
-        """Get electron density in m^-3 from refractive index"""
-        self.nTCI = nTCI
-        #convert to 
-        self.neTCI = nTCI.copy()
-        self.neTCI.m *= -self.neTCI.m
-        self.neTCI.m += 1.
-        self.neTCI.m *= self.frequency**2/8.980**2
-        #wp = 5.63e4*np.sqrt(ne/1e6)/2pi#Hz^2 m^3 lightman p 226
-        return self.neTCI
-    
-    def eulerODE(self,y,t,*args):
+        return n_tci
+        
+    def euler_ode(self,y,t,*args):
         '''return pxdot,pydot,pzdot,xdot,ydot,zdot,sdot'''
-        #print(y)
         px,py,pz,x,y,z,s = y
-        if self.straightLineApprox:
+        if self.straight_line_approx:
             n,nx,ny,nz = 1.,0,0,0
         else:
-            n,nx,ny,nz,nxy,nxz,nyz,nxyz = self.nTCI.interp(x,y,z,doDiff=True)
+            n,nx,ny,nz,nxy,nxz,nyz,nxyz = self.n_tci.interp(x,y,z),0.,0.,0.,0.,0.,0.,0.
         #from ne
-        #ne,nex,ney,nez,nexy,nexz,neyz,nexyz = self.neTCI.interp(x,y,z,doDiff=True)
+        #ne,nex,ney,nez,nexy,nexz,neyz,nexyz = self.ne_tci.interp(x,y,z,doDiff=True)
         #A = - 8.98**2/self.frequency**2
         #n = math.sqrt(1. + A*ne)
         #ndot = A/(2.*n)
@@ -100,17 +77,18 @@ class Fermat(object):
         
         return [pxdot,pydot,pzdot,xdot,ydot,zdot,sdot]
     
-    def jacODE(self,y,t,*args):
+    def jac_ode(self,y,t,*args):
         '''return d ydot / d y, with derivatives down columns for speed'''
         px,py,pz,x,y,z,s = y
-        if self.straightLineApprox:
+        if self.straight_line_approx:
             n,nx,ny,nz,nxy,nxz,nyz = 1.,0,0,0,0,0,0
         else:
-            n,nx,ny,nz,nxy,nxz,nyz,nxyz = self.nTCI.interp(x,y,z,doDiff=True)
+
+            n,nx,ny,nz,nxy,nxz,nyz,nxyz = self.n_tci.interp(x,y,z),0.,0.,0.,0.,0.,0.,0.
         #TCI only gaurentees C1 and C2 information is lost, second order anyways
         nxx,nyy,nzz = 0.,0.,0.
         #from electron density
-        #ne,nex,ney,nez,nexy,nexz,neyz,nexyz = self.neTCI.interp(x,y,z,doDiff=True)
+        #ne,nex,ney,nez,nexy,nexz,neyz,nexyz = self.ne_tci.interp(x,y,z,doDiff=True)
         #A = - 8.98**2/self.frequency**2
         #n = math.sqrt(1. + A*ne)
         #ndot = A/(2.*n)
@@ -162,7 +140,7 @@ class Fermat(object):
                             [ 0,  0,  0, 0, 0, 0, 0.]])
         return jac
         
-    def integrateRay(self,origin,direction,tmax,N=100):
+    def integrate_ray(self,origin,direction,tmax,N=100):
         '''Integrate ray defined by the ``origin`` and ``direction`` along the independent variable (s or z)
         until tmax. 
         ``N`` - the number of partitions along the ray to save ray trajectory.'''
@@ -179,7 +157,7 @@ class Fermat(object):
             tarray = np.linspace(z0,tmax,N)
         if self.type == 's':
             tarray = np.linspace(0,tmax,N)
-        Y,info =  odeint(self.eulerODE, init, tarray,Dfun = self.jacODE, col_deriv = True, full_output=1)
+        Y,info =  odeint(self.euler_ode, init, tarray,Dfun = self.jac_ode, col_deriv = True, full_output=1)
         #print(info['hu'].shape,np.sum(info['hu']),info['hu'])
         #print(Y)
         x = Y[:,3]
@@ -187,5 +165,3 @@ class Fermat(object):
         z = Y[:,5]
         s = Y[:,6]
         return x,y,z,s   
-
-

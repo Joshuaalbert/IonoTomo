@@ -1,8 +1,8 @@
 from ionotomo.geometry.tri_cubic import TriCubic
 import numpy as np
 import os
-
-from ionotomo.plotting import *
+from ionotomo.astro.real_data import *
+from ionotomo.plotting.plot_tools import *
 
 def test_plot_tci():
     vec = np.linspace(-1,1,100)
@@ -13,26 +13,22 @@ def test_plot_tci():
     plot_tci(tci,show=True)
 
 def test_plot_datapack():
-    datapack = DataPack(filename="output/test/datapack_obs.hdf5")
-    try:
-        os.makedirs('output/test/plot_datapack')
-    except:
-        pass
-    plot_datapack(datapack,ant_idx=-1,time_idx=[0,1,2,3], dir_idx=-1,figname=None)#'output/test/plot_datapack/fig')
+    datapack = generate_example_datapack(Ntime=3)
+    plot_datapack(datapack,ant_idx=-1,time_idx=[0,1], dir_idx=-1,figname=None)
 
-def test_transfer_patch_data():
-    if os.path.isfile('test_data/WendysBootes.npz'):
-        transfer_patch_data(infoFile='test_data/WendysBootes.npz', 
-                      data_folder='test_data/', 
-                      hdf5Out='test_data/dtecData.hdf5')
+#def test_transfer_patch_data():
+#    if os.path.isfile('test_data/WendysBootes.npz'):
+#        transfer_patch_data(infoFile='test_data/WendysBootes.npz', 
+#                      data_folder='test_data/', 
+#                      hdf5Out='test_data/dtecData.hdf5')
 
-def test_prepare_datapack():
-    
-    datapack = prepare_datapack('test_data/dtecData.hdf5',timeStart=0,timeEnd=-1,
-                           array_file='arrays/lofar.hba.antenna.cfg')
-    datapack.flag_antennas(['CS007HBA1','CS007HBA0','CS013HBA0','CS013HBA1'])
-    datapack.set_reference_antenna(datapack.antenna_labels[0])
-    #'CS501HBA1'
-    datapack.save("output/test/datapack_obs.hdf5")
-
+#def test_prepare_datapack():
+#    
+#    datapack = prepare_datapack('test_data/dtecData.hdf5',timeStart=0,timeEnd=-1,
+#                           array_file='arrays/lofar.hba.antenna.cfg')
+#    datapack.flag_antennas(['CS007HBA1','CS007HBA0','CS013HBA0','CS013HBA1'])
+#    datapack.set_reference_antenna(datapack.antenna_labels[0])
+#    #'CS501HBA1'
+#    datapack.save("output/test/datapack_obs.hdf5")
+#
 

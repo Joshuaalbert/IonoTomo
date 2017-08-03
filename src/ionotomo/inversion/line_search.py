@@ -102,7 +102,7 @@ def line_search(rays,K_ne,m_tci,i0,gradient,g,dobs,CdCt,figname=None):
 def test_line_search():
     from real_data import DataPack
     from tri_cubic import TriCubic
-    from CalcRays import calcRays
+    from CalcRays import calc_rays
 
     from InitialModel import create_initial_model
     from Gradient import compute_gradient, compute_gradient_dask
@@ -122,7 +122,7 @@ def test_line_search():
     phase = datapack.get_center_direction()
     array_center = datapack.radio_array.get_center()
     print("Calculating rays...")
-    rays = calcRays(antennas,patches,times, array_center, fixtime, phase, ne_tci, datapack.radio_array.frequency, True, 1000., 100)
+    rays = calc_rays(antennas,patches,times, array_center, fixtime, phase, ne_tci, datapack.radio_array.frequency, True, 1000., 100)
     m_tci = ne_tci.copy()
     K_ne = np.mean(m_tci.m)
     m_tci.m /= K_ne

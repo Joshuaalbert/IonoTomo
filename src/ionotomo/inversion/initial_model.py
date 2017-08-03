@@ -1,17 +1,12 @@
-
-# coding: utf-8
-
-# In[1]:
-
 import astropy.units as au
-import astropy.time as at
 import astropy.coordinates as ac
 import numpy as np
-from scipy.special import gamma
-from uvw_frame import UVW
-from IRI import a_priori_model
-from tri_cubic import TriCubic
-from Covariance import Covariance
+from ionotomo.astro.frames.uvw_frame import UVW
+from ionotomo.ionosphere.iri import a_priori_model
+from ionotomo.geometry.tri_cubic import TriCubic
+from ionotomo.ionosphere.covariance import Covariance
+
+import logging as log
 
 def determine_inversion_domain(spacing,antennas, directions, pointing, zmax, padding = 20):
     '''Determine the domain of the inversion'''
@@ -35,11 +30,11 @@ def determine_inversion_domain(spacing,antennas, directions, pointing, zmax, pad
     uvec = np.linspace(umin,umax,int(Nu))
     vvec = np.linspace(vmin,vmax,int(Nv))
     wvec = np.linspace(wmin,wmax,int(Nw))
-    print("Found domain u in {}..{}, v in {}..{}, w in {}..{}".format(umin,umax,vmin,vmax,wmin,wmax))
+    log.info("Found domain u in {}..{}, v in {}..{}, w in {}..{}".format(umin,umax,vmin,vmax,wmin,wmax))
     return uvec,vvec,wvec
 
-def turbulent_perturbation(TCI,sigma = 3.,corr = 20., nu = 5./2.):    
-    cov_obj = Covariance(TCI,sigma,corr,nu)
+def turbulent_perturbation(tci,sigma = 3.,corr = 20., nu = 5./2.):    
+    cov_obj = Covariance(tci,sigma,corr,nu)
     B = cov_obj.realization()
     return B
     
@@ -52,57 +47,48 @@ def create_initial_model(datapack,ant_idx = -1, time_idx = -1, dir_idx = -1, zma
     Nt = len(times)
     Nd = len(patches)  
     #Setting up ionosphere to use
-    print("Using radio array {}".format(datapack.radio_array))
+    log.info("Using radio array {}".format(datapack.radio_array))
     phase = datapack.get_center_direction()
-    print("Using phase center {} {}".format(phase.ra,phase.dec))
+    log.info("Using phase center {} {}".format(phase.ra,phase.dec))
     fixtime = times[Nt>>1]
-    print("Fixing frame at {}".format(fixtime.isot))
+    log.info("Fixing frame at {}".format(fixtime.isot))
     uvw = UVW(location = datapack.radio_array.get_center().earth_location,obstime = fixtime,phase = phase)
-    print("Elevation is {}".format(uvw.elevation))
+    log.info("Elevation is {}".format(uvw.elevation))
     zenith = datapack.radio_array.get_sun_zenith_angle(fixtime)
-    print("Sun at zenith angle {}".format(zenith))
-    print("Creating ionosphere model...")
+    log.info("Sun at zenith angle {}".format(zenith))
+    log.info("Creating ionosphere model...")
     xvec,yvec,zvec = determine_inversion_domain(spacing,antennas, patches,uvw, zmax, padding = padding)
     X,Y,Z = np.meshgrid(xvec,yvec,zvec,indexing='ij')
-    print("Nx={} Ny={} Nz={} number of cells: {}".format(len(xvec),len(yvec),len(zvec),np.size(X)))
+    log.info("Nx={} Ny={} Nz={} number of cells: {}".format(len(xvec),len(yvec),len(zvec),np.size(X)))
     coords = ac.SkyCoord(X.flatten()*au.km,Y.flatten()*au.km,Z.flatten()*au.km,frame=uvw).transform_to('itrs').earth_location.to_geodetic('WGS84')
     heights = coords[2].to(au.km).value#height in geodetic
-    neModel = a_priori_model(heights,zenith).reshape(X.shape)
-    neModel[neModel<4e7] = 4e7
-    return TriCubic(xvec,yvec,zvec,neModel)
+    ne_model = a_priori_model(heights,zenith).reshape(X.shape)
+    ne_model[ne_model<4e7] = 4e7
+    return TriCubic(xvec,yvec,zvec,ne_model)
 
-def createTurbulentlModel(datapack,ant_idx = -1, time_idx = -1, dir_idx = -1, zmax = 1000., spacing=5.):
-    ne_tci = create_initial_model(datapack,ant_idx = ant_idx, time_idx = time_idx, dir_idx = dir_idx, zmax = zmax, spacing= spacing)
-    dM = turbulent_perturbation(ne_tci,sigma=np.log(5.),corr=25.,nu=7./2.)
-    pertTCI = TriCubic(ne_tci.xvec,ne_tci.yvec,ne_tci.zvec,ne_tci.get_shaped_array()*np.exp(dM))
-    return pertTCI
+def create_turbulent_model(datapack,corr=20.,ant_idx = -1, time_idx = -1, dir_idx = -1, zmax = 1000., spacing=5., padding=20,seed=None):
+    if seed is not None:
+        np.random.seed(seed)
+    ne_tci = create_initial_model(datapack,ant_idx = ant_idx, time_idx = time_idx, dir_idx = dir_idx, zmax = zmax, spacing= spacing,padding=padding)
+    dn_max = np.sqrt(1 - 8.98**2 * 5e11/datapack.radio_array.frequency**2) - np.sqrt(1 - 8.98**2 * 1e12/datapack.radio_array.frequency**2)
+    log.info("Max dn {}".format(dn_max))
+    n_max = np.sqrt(1 - 8.98**2 * 4e7/datapack.radio_array.frequency**2)
+    dn = turbulent_perturbation(ne_tci,sigma=dn_max/2.,corr=corr,nu=2./3.)
+    dn += dn_max/2.
+    #dn *= ne_tci.M/np.max(ne_tci.M)
+    #ne = ne_tci.M*np.exp(dm)
+    n = np.sqrt(1 - 8.98**2 * ne_tci.M/datapack.radio_array.frequency**2)   
+    n -= dn
+    n[n>n_max] = n_max
     
-def test_create_initial_model():
-    from real_data import DataPack
-    datapack = DataPack(filename="output/test/datapack_obs.hdf5")
-    ne_tci = create_initial_model(datapack,ant_idx = -1, time_idx = -1, dir_idx = -1, zmax = 1000.)
-    ne_tci.save("output/test/neModel.hdf5")
-    
-def test_create_turbulent_model():
-    from real_data import DataPack
-    from PlotTools import animate_tci_slices
-    import os
-    datapack = DataPack(filename="output/test/datapack_obs.hdf5")
-    for i in range(1):
-        ne_tci = createTurbulentlModel(datapack,ant_idx = -1, time_idx = [0], dir_idx = -1, zmax = 1000.)
-        try:
-            os.makedirs("output/test/InitialModel/turbulent-{}/fig".format(i))
-        except:
-            pass
-        #ne_tci.save("output/test/InitialModel/turbulent-{}/neModelTurbulent.hdf5".format(i))
-        #animate_tci_slices(ne_tci,"output/test/InitialModel/turbulent-{}/fig".format(i))
-    
-if __name__ == '__main__':
-    #test_create_initial_model()
-    test_create_turbulent_model()
-
-
-# In[ ]:
-
+#    n /= np.max(n)
+#    n *= 0.99999
+    #n -= np.min(n)
+    #n /= np.max(n)
+    #n *= 0.007
+    #n += (1-0.007)
+    ne = (n**2 - 1.)/-8.98**2 * datapack.radio_array.frequency**2
+    pert_tci = TriCubic(ne_tci.xvec,ne_tci.yvec,ne_tci.zvec,ne)
+    return pert_tci
 
 

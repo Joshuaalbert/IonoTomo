@@ -49,20 +49,20 @@ def mayaviPlot2(x,m,mBackground=None,maxNumPts=None):
     
     mlab.axes()
     mlab.show()
-def plotWavefront(neTCI,rays,save=False,animate=False):
-    xmin = neTCI.xvec[0]
-    xmax = neTCI.xvec[-1]
-    ymin = neTCI.yvec[0]
-    ymax = neTCI.yvec[-1]
-    zmin = neTCI.zvec[0]
-    zmax = neTCI.zvec[-1]
+def plot_wavefront(ne_tci,rays,save=False,animate=False):
+    xmin = ne_tci.xvec[0]
+    xmax = ne_tci.xvec[-1]
+    ymin = ne_tci.yvec[0]
+    ymax = ne_tci.yvec[-1]
+    zmin = ne_tci.zvec[0]
+    zmax = ne_tci.zvec[-1]
     
-    X,Y,Z = np.mgrid[xmin:xmax:len(neTCI.xvec)*1j,
-                     ymin:ymax:len(neTCI.yvec)*1j,
-                     zmin:zmax:len(neTCI.zvec)*1j]
+    X,Y,Z = np.mgrid[xmin:xmax:len(ne_tci.xvec)*1j,
+                     ymin:ymax:len(ne_tci.yvec)*1j,
+                     zmin:zmax:len(ne_tci.zvec)*1j]
     
     #reshape array
-    data = neTCI.getShapedArray()
+    data = ne_tci.get_shaped_array()
     print(np.mean(data),np.max(data),np.min(data))
     l = mlab.pipeline.volume(mlab.pipeline.scalar_field(X,Y,Z,data))#,vmin=min, vmax=min + .5*(max-min))
     l._volume_property.scalar_opacity_unit_distance = min((xmax-xmin)/4.,(ymax-ymin)/4.,(zmax-zmin)/4.)
@@ -115,9 +115,9 @@ def plotWavefront(neTCI,rays,save=False,animate=False):
         import os
         os.system('ffmpeg -r 10 -f image2 -s 1900x1080 -i figs/wavefronts/wavefront_%04d.png -vcodec libx264 -crf 25  -pix_fmt yuv420p figs/wavefronts/wavefront.mp4')
 
-def plotModel(neTCI,save=False):
+def plot_model(ne_tci,save=False):
     '''Plot the model contained in a tricubic interpolator (a convienient container for one)'''
-    plotWavefront(neTCI,None,save=save)
+    plot_wavefront(ne_tci,None,save=save)
     
 def generateModelFromOctree(octTree,numRays):
     '''Generate model '''
@@ -221,10 +221,10 @@ def makeRaysFromSourceAndReciever(recievers=None,directions=None,sources=None,ma
             y = np.cos(alt)*np.cos(az)
             directions.append(np.array([x,y,z]))
     if directions is None:
-        numDirections = numSources
+        num_directions = numSources
         directions = []
-        print("Generating {} directions".format(numDirections))
-        for i in range(numDirections):
+        print("Generating {} directions".format(num_directions))
+        for i in range(num_directions):
             mag = np.linalg.norm(sources[i])
             #direction cosines
             directions.append(sources[i]/mag)
@@ -761,7 +761,7 @@ def LMSol(G,mprior,Cd,Cm,dobs,mu=1.,octTree=None):
     return K*np.exp(mlog), cmlin
 
 
-def invertTEC(infoFile,dataFolder,timeStart = 0, timeEnd = 0,arrayFile='arrays/lofar.hba.antenna.cfg',load=False):
+def invertTEC(infoFile,data_folder,timeStart = 0, timeEnd = 0,array_file='arrays/lofar.hba.antenna.cfg',load=False):
     '''Invert the 3d tec from data.
     timeStart, timeEnd inclusive.
     Puts the data into an ENU system then rotates the up to the mean direction vector
@@ -783,11 +783,11 @@ def invertTEC(infoFile,dataFolder,timeStart = 0, timeEnd = 0,arrayFile='arrays/l
             pass
     if generate:
         print("creating radio array")
-        radioArray = RadioArray(arrayFile)
+        radio_array = RadioArray(array_file)
         print("creating coord sys")
-        coordSys = InversionCoordSys(radioArray)
+        coordSys = InversionCoordSys(radio_array)
         coordSysSet = False
-        enu = ENU(location=radioArray.getCenter().earth_location)
+        enu = ENU(location=radio_array.get_center().earth_location)
         print("ENU system set: {0}".format(enu))
         meanDirection = np.zeros(3)
         numRays = 0
@@ -797,18 +797,18 @@ def invertTEC(infoFile,dataFolder,timeStart = 0, timeEnd = 0,arrayFile='arrays/l
         numPatches = len(patches)
         radec = info['directions']
         print("Loaded {0} patches".format(numPatches))
-        #get array stations (shoud fold this into radioArray. todo)
-        stationLabels = np.genfromtxt(arrayFile, comments='#',usecols = (4),dtype=type(""))
-        stationLocs = np.genfromtxt(arrayFile, comments='#',usecols = (0,1,2))
+        #get array stations (shoud fold this into radio_array. todo)
+        stationLabels = np.genfromtxt(array_file, comments='#',usecols = (4),dtype=type(""))
+        stationLocs = np.genfromtxt(array_file, comments='#',usecols = (0,1,2))
         numStations = len(stationLabels)
         print("Number of stations in array: {0}".format(numStations))
         #assume all times and antennas are same in each datafile
         recievers = []
-        numTimes =  (timeEnd - timeStart + 1)
-        print("Number of time stamps: {0}".format(numTimes))
+        num_time =  (timeEnd - timeStart + 1)
+        print("Number of time stamps: {0}".format(num_time))
         #each time gives a different direction for each patch
-        numDirs = numTimes*numPatches
-        print("Number of directions: {0}".format(numDirs))
+        num_dirs = num_time*numPatches
+        print("Number of directions: {0}".format(num_dirs))
         data = []
         rays = []
         stationIndices = []
@@ -817,18 +817,18 @@ def invertTEC(infoFile,dataFolder,timeStart = 0, timeEnd = 0,arrayFile='arrays/l
         skyPlane = Plane([0,0,1000],normal=[0,0,1])
         skyProj = []
         skyProjCoords = []
-        patchIdx = 0
+        patch_idx = 0
         failed = 0
         rayId = 0
-        while patchIdx < numPatches:
-            patch = patches[patchIdx]
-            rd = radec[patchIdx]
-            files = glob.glob("{0}/*_{1}_*.npz".format(dataFolder,patch))
+        while patch_idx < numPatches:
+            patch = patches[patch_idx]
+            rd = radec[patch_idx]
+            files = glob.glob("{0}/*_{1}_*.npz".format(data_folder,patch))
             if len(files) == 1:
                 file = files[0]
             else:
                 print('Could not find patch: {0}'.format(patch))
-                patchIdx += 1
+                patch_idx += 1
                 continue
             print("Loading data file: {0}".format(file))
             try:
@@ -836,17 +836,17 @@ def invertTEC(infoFile,dataFolder,timeStart = 0, timeEnd = 0,arrayFile='arrays/l
             except:
                 print("Failed loading data file: {0}".format(file))
                 failed += 1
-                patchIdx += 1
+                patch_idx += 1
                 continue
             antennas = d['antennas']
             times = d['times'][timeStart:timeEnd+1]
             tecData = d['data'][timeStart:timeEnd+1,:]#times x antennas
-            timeIdx = 0
-            while timeIdx < numTimes:
-                #dirIdx = i*numTimes + j
-                time = at.Time(times[timeIdx],format='gps',scale='tai')
+            time_idx = 0
+            while time_idx < num_time:
+                #dir_idx = i*num_time + j
+                time = at.Time(times[time_idx],format='gps',scale='tai')
                 print("Processing time: {0}".format(time.isot))
-                frame = ac.AltAz(location=radioArray.getCenter().earth_location,obstime=time)
+                frame = ac.AltAz(location=radio_array.get_center().earth_location,obstime=time)
                 if not coordSysSet:
                     print("fixing coord sys to first patch")
                     fixedDir = coordSys.getDirection(rd.ra.deg,rd.dec.deg,time)
@@ -868,9 +868,9 @@ def invertTEC(infoFile,dataFolder,timeStart = 0, timeEnd = 0,arrayFile='arrays/l
 
                 #dir = coordSys.getComponents(rd.ra.deg,rd.dec.deg,time)
                 #xaxis,yaxis,zaxis = coordSys.getAxes()
-                antIdx = 0#index in solution table
-                while antIdx < len(antennas):
-                    ant = antennas[antIdx]
+                ant_idx = 0#index in solution table
+                while ant_idx < len(antennas):
+                    ant = antennas[ant_idx]
                     #find index in stationLabels
                     labelIdx = 0
                     while labelIdx < numStations:
@@ -887,16 +887,16 @@ def invertTEC(infoFile,dataFolder,timeStart = 0, timeEnd = 0,arrayFile='arrays/l
                     #print(origin)
                     rays.append(Ray(origin,dir.cartesian.xyz.value,id = rayId))
                     rayId += 1
-                    data.append(tecData[timeIdx,antIdx])
+                    data.append(tecData[time_idx,ant_idx])
                     skyProj.append(data[-1])
                     res,point = intersectRayPlane(rays[-1],skyPlane)
                     skyProjCoords.append(point)
                     stationIndices.append(labelIdx)
-                    timeIndices.append(timeIdx)
-                    patchIndices.append(patchIdx)
-                    antIdx += 1
-                timeIdx += 1
-            patchIdx += 1
+                    timeIndices.append(time_idx)
+                    patchIndices.append(patch_idx)
+                    ant_idx += 1
+                time_idx += 1
+            patch_idx += 1
         #rotate the rays and stations so that the mean direction points up
         meanDirection /= numRays
         #
@@ -969,7 +969,7 @@ if __name__=='__main__':
     #          "/Users/josh/ownCloud/ionosphere/tomography/SB120-129",
     #          timeStart = 0, 
     #          timeEnd = 0,
-    #          arrayFile='arrays/lofar.hba.antenna.cfg',load=True)
+    #          array_file='arrays/lofar.hba.antenna.cfg',load=True)
     if True:
         print("Constructing ionosphere model")
         maxBaseline = 150.

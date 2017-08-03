@@ -20,15 +20,15 @@ from IRI import a_priori_model, determine_inversion_domain
 from tri_cubic import TriCubic
 from progressbar import ProgressBar
 
-def get_datum_idx(ant_idx,time_idx,dir_idx,numAnt,numTimes):
+def get_datum_idx(ant_idx,time_idx,dir_idx,num_ant,num_time):
     '''standarizes indexing'''
-    idx = ant_idx + numAnt*(time_idx + numTimes*dir_idx)
+    idx = ant_idx + num_ant*(time_idx + num_time*dir_idx)
     return int(idx)
 
-def get_datum(datum_idx,numAnt,numTimes):
-    ant_idx = datum_idx % numAnt
-    time_idx = (datum_idx - ant_idx)/numAnt % numTimes
-    dir_idx = (datum_idx - ant_idx - numAnt*time_idx)/numAnt/numTimes
+def get_datum(datum_idx,num_ant,num_time):
+    ant_idx = datum_idx % num_ant
+    time_idx = (datum_idx - ant_idx)/num_ant % num_time
+    dir_idx = (datum_idx - ant_idx - num_ant*time_idx)/num_ant/num_time
     return int(ant_idx),int(time_idx),int(dir_idx)
 
 
@@ -110,7 +110,7 @@ def simulate_dtec(datapack_obs,num_threads,datafolder,straight_line_approx=True,
     ne_pert += 5e12*np.exp(-((X)**2/50.**2 + (Y)**2/50.**2 + (Z-400)**2/60.**2)/2.)
     
     ne_tci = TriCubic(xvec,yvec,zvec,nePrior,use_cache = True,default=None)
-    ne_tci.save("{}/apriori_neModel.hdf5".format(datafolder))
+    ne_tci.save("{}/apriori_ne_model.hdf5".format(datafolder))
     ne_tci = TriCubic(xvec,yvec,zvec,ne_pert,use_cache = True,default=None)
     K_e = np.mean(ne_tci.m)
     neMean = ne_tci.m.copy()
@@ -196,7 +196,7 @@ def simulate_dtec(datapack_obs,num_threads,datafolder,straight_line_approx=True,
     muTCI.clear_cache()
     ne_tci.m = K_e*np.exp(muTCI.m)
     ne_tci.clear_cache()
-    ne_tci.save("{}/neModel-{}.hdf5".format(datafolder,iteration))
+    ne_tci.save("{}/ne_model-{}.hdf5".format(datafolder,iteration))
     print("Creating tec/Ct integration job server")
     job_server_tec = pp.Server(num_threads, ppservers=())
     #plot rays
@@ -247,7 +247,7 @@ def simulate_dtec(datapack_obs,num_threads,datafolder,straight_line_approx=True,
     plot_datapack(datapack,ant_idx=ant_idx,time_idx=time_idx, dir_idx=dir_idx)
     return datapack
 
-def plot_tci(datafolder="output/simulated",datapackFile = "datapack_sim.hdf5", ne_tciFile='neModel-0.hdf5',ant_idx=np.arange(10),time_idx=np.arange(1),dir_idx=-1):
+def plot_tci(datafolder="output/simulated",datapackFile = "datapack_sim.hdf5", ne_tciFile='ne_model-0.hdf5',ant_idx=np.arange(10),time_idx=np.arange(1),dir_idx=-1):
     from real_data import DataPack
     import numpy as np
     from tri_cubic import TriCubic
@@ -323,7 +323,7 @@ def plot_tci(datafolder="output/simulated",datapackFile = "datapack_sim.hdf5", n
 
     os.system("ffmpeg.exe -framerate {} -i {}/figs/slice-%04d.png {}/figs/movie.mp4".format(int(Nz/10.),datafolder,datafolder))
 
-def weightTCI(datafolder="output/simulated",datapackFile = "datapack_sim.hdf5", a_priori_file = 'apriori_neModel.hdf5',ne_tciFile='neModel-0.hdf5',ant_idx=np.arange(10),time_idx=np.arange(1),dir_idx=-1):
+def weightTCI(datafolder="output/simulated",datapackFile = "datapack_sim.hdf5", a_priori_file = 'apriori_ne_model.hdf5',ne_tciFile='ne_model-0.hdf5',ant_idx=np.arange(10),time_idx=np.arange(1),dir_idx=-1):
     from real_data import DataPack
     import numpy as np
     from tri_cubic import TriCubic
@@ -429,7 +429,7 @@ def weightTCI(datafolder="output/simulated",datapackFile = "datapack_sim.hdf5", 
     os.system("ffmpeg.exe -framerate {} -i {}/figs/slice-%04d.png {}/figs/movie.mp4".format(int(Nz/10.),datafolder,datafolder))
 
 
-def allTCI(datafolder="output/simulated",datapackFile = "datapack_sim.hdf5", a_priori_file = 'apriori_neModel.hdf5',ne_tciFile='neModel-0.hdf5',ant_idx=np.arange(10),time_idx=np.arange(1),dir_idx=-1):
+def allTCI(datafolder="output/simulated",datapackFile = "datapack_sim.hdf5", a_priori_file = 'apriori_ne_model.hdf5',ne_tciFile='ne_model-0.hdf5',ant_idx=np.arange(10),time_idx=np.arange(1),dir_idx=-1):
     from real_data import DataPack
     import numpy as np
     from tri_cubic import TriCubic
@@ -661,9 +661,9 @@ if __name__ == '__main__':
         
         
 
-    #allTCI(datafolder="output/simulated_6",datapackFile = "dataobs.hdf5", a_priori_file = 'apriori_neModel.hdf5',
-    #          ne_tciFile='neModel-0.hdf5',ant_idx=ant_idx,time_idx=np.arange(1),dir_idx=dir_idx)
-    #plot_tci(datafolder="output/simulated_4",datapackFile = "dataobs.hdf5",ne_tciFile='neModel-0.hdf5',
+    #allTCI(datafolder="output/simulated_6",datapackFile = "dataobs.hdf5", a_priori_file = 'apriori_ne_model.hdf5',
+    #          ne_tciFile='ne_model-0.hdf5',ant_idx=ant_idx,time_idx=np.arange(1),dir_idx=dir_idx)
+    #plot_tci(datafolder="output/simulated_4",datapackFile = "dataobs.hdf5",ne_tciFile='ne_model-0.hdf5',
     #        ant_idx=-1, time_idx=np.arange(1),dir_idx=-1)
 
 

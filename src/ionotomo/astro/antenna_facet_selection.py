@@ -4,8 +4,9 @@ from ionotomo.astro.real_data import DataPack
 import numpy as np
 import astropy.units as au
 from ionotomo.astro.frames.uvw_frame import UVW
+import logging as log
 
-def select_facets(N,datapack,dir_idx=-1,time_idx=[0]):
+def select_facets(N,datapack,dir_idx=-1,time_idx=-1):
     '''Will select N uniform assembly of antennas and return a datapack
     with the rest flagged'''
     assert N <= datapack.Nd, "Requested number of directions {} to large {}".format(N,datapack.Na)
@@ -14,7 +15,7 @@ def select_facets(N,datapack,dir_idx=-1,time_idx=[0]):
     Nd = len(patches)
     Nt = len(times)
     fixtime = times[Nt>>1]
-    #print("Fixing frame at {}".format(fixtime.isot))
+    #log.info("Fixing frame at {}".format(fixtime.isot))
     phase = datapack.get_center_direction()
     uvw = UVW(location = datapack.radio_array.get_center().earth_location,obstime = fixtime,phase = phase)
     #
@@ -47,10 +48,10 @@ def select_facets(N,datapack,dir_idx=-1,time_idx=[0]):
         i += 1
     out_datapack = datapack.clone()
     out_datapack.flag_directions(flag)
-    print("flagged {}".format(flag))
+    log.info("flagged {}".format(flag))
     return out_datapack
 
-def select_antennas(N,datapack,ant_idx=-1,time_idx=[0]):
+def select_antennas(N,datapack,ant_idx=-1,time_idx=-1):
     '''Will select N uniform assembly of antennas and return a datapack
     with the rest flagged'''
     assert N <= datapack.Na, "Requested number of antennas {} to large {}".format(N,datapack.Na)
@@ -59,7 +60,7 @@ def select_antennas(N,datapack,ant_idx=-1,time_idx=[0]):
     Na = len(antennas)
     Nt = len(times)
     fixtime = times[Nt>>1]
-    #print("Fixing frame at {}".format(fixtime.isot))
+    #log.info("Fixing frame at {}".format(fixtime.isot))
     phase = datapack.get_center_direction()
     uvw = UVW(location = datapack.radio_array.get_center().earth_location,obstime = fixtime,phase = phase)
     #
@@ -94,12 +95,12 @@ def select_antennas(N,datapack,ant_idx=-1,time_idx=[0]):
         i += 1
     out_datapack = datapack.clone()
     out_datapack.flag_antennas(flag)
-    print("flagged {}".format(flag))
+    log.info("flagged {}".format(flag))
     out_datapack.set_reference_antenna(antenna_labels[outidx[0]])
     return out_datapack
 
-def selectAntennaFacets(N,datapack,ant_idx=-1,dir_idx=-1,time_idx=[0]):
-    datapack = select_antennas(N,datapack,ant_idx=-1,time_idx=time_idx)
-    datapack = select_facets(N,datapack,dir_idx=-1,time_idx=time_idx)
+def select_antennas_facets(N,datapack,ant_idx=-1,dir_idx=-1,time_idx=-1):
+    datapack = select_antennas(N,datapack,ant_idx=ant_idx,time_idx=time_idx)
+    datapack = select_facets(N,datapack,dir_idx=dir_idx,time_idx=time_idx)
     return datapack
 

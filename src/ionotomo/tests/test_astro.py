@@ -8,6 +8,7 @@ def test_radio_array():
     print("Test radio array")
     radio_array = generate_example_radio_array(Nant=10)
     print(radio_array)
+    print(RadioArray.lofar_array)
     assert radio_array.Nantenna == 10
     assert os.path.isfile(RadioArray.lofar_array)
     radio_array = RadioArray(RadioArray.lofar_array)
@@ -33,7 +34,7 @@ def test_real_data():
     
 def test_antenna_facet_selection():
     print("Test antenna facet selection")
-    datapack = generate_example_datapack(Nant=10, Ndir = 12)
+    datapack = generate_example_datapack(Nant=12, Ndir = 12)
     datapack_sel = select_antennas(10,datapack,-1, time_idx = [0])
     antennas,antenna_labels = datapack_sel.get_antennas(ant_idx = -1)
     times,timestamps = datapack_sel.get_times(time_idx=[0])
