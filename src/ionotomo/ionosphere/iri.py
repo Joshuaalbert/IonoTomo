@@ -3,7 +3,7 @@ import numpy as np
 
 '''Derivations in ionotomo.notebooks'''
 
-def a_priori_model(h,zenith):
+def a_priori_model(h,zenith,thin_f=False):
     '''Return a stratified reference ionosphere electron density based on 
     fitted data depending on zenith angle of the sun in degrees.    
     `h` : `numpy.ndarray` 
@@ -39,11 +39,15 @@ def a_priori_model(h,zenith):
     nm_f1 = peak_density(2.0e11,9.1e10,54.,13.6,zenith)
     zm_f1 = 185.
     H_f1 = 40.
+    if thin_f:
+        H_f1 /= 2.
     n_f1 = layer_density(nm_f1,zm_f1,H_f1,h)
     #F2 layer
     nm_f2 = peak_density(7.7e10,4.4e11,111.,4.8,zenith)
     zm_f2 = peak_height(242.,75.,7.46,96.,zenith)
     H_f2 = 55.
+    if thin_f:
+        H_f2 /= 2.
     n_f2 = layer_density(nm_f2,zm_f2,H_f2,h)
 
     n = np.atleast_1d(n_d + n_e + n_f1 + n_f2)

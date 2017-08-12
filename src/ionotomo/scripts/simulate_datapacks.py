@@ -22,9 +22,9 @@ def run(output_folder):
     except:
         pass
     log.info("Plotting generated ionospheres")
-    datapack_files = np.genfromtxt(os.path.join(output_folder,"info"),dtype='str',usecols=[4])
-    tci_files = np.genfromtxt(os.path.join(output_folder,"info"),dtype='str',usecols=[5])
-    plot_dsk = []
+    info_file = os.path.join(output_folder,"info")
+    datapack_files = np.genfromtxt(info_file,dtype='str',usecols=[4])
+    tci_files = np.genfromtxt(info_file,dtype='str',usecols=[5])
     for datapack_file,tci_file in zip(datapack_files,tci_files):
     #    file = str(file,'utf-8')
         ne_tci = TriCubic(filename=tci_file)
@@ -38,7 +38,7 @@ def run(output_folder):
         fixtime = times[Nt>>1]
         phase = datapack.get_center_direction()
         array_center = datapack.radio_array.get_center()
-        rays = calc_rays(antennas,patches,times, array_center, fixtime, phase, ne_tci, datapack.radio_array.frequency, True, 1000, 250)
+        rays = calc_rays(antennas,patches,times, array_center, fixtime, phase, ne_tci, datapack.radio_array.frequency, True, 1000, ne_tci.nz)
         K_ne = np.mean(ne_tci.M)
         ne_tci.M = np.log(ne_tci.M/K_ne)
         m_tci = ne_tci
@@ -50,4 +50,4 @@ def run(output_folder):
         datapack.save(datapack_file)
 
 if __name__=='__main__':
-    run('output')
+    run('output_quiet')

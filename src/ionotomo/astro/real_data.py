@@ -214,6 +214,14 @@ class DataPack(object):
             k += 1
         return output, output_labels
     
+    def get_antenna_idx(self,ant):
+        assert ant in self.antenna_labels, "{} not a valid label".format(ant)
+        i = 0
+        while i < self.Na:
+            if self.antenna_labels[i] == ant:
+                return i
+            i += 1
+    
     def set_reference_antenna(self,ref_ant):
         if ref_ant is None:
             return

@@ -6,6 +6,26 @@ import astropy.units as au
 from ionotomo.astro.frames.uvw_frame import UVW
 import logging as log
 
+def select_random_facets(N,datapack,dir_idx=-1,time_idx=-1):
+    '''Will select N uniform assembly of antennas and return a datapack
+    with the rest flagged'''
+    assert N <= datapack.Nd, "Requested number of directions {} to large {}".format(N,datapack.Na)
+    patches, patch_names = datapack.get_directions(dir_idx=dir_idx)
+    flag_patches = []
+    unflagged = list(patch_names)
+    k = 0
+    while len(unflagged) > N:
+        idx = np.random.randint(len(unflagged))
+        flag_patches.append(unflagged[idx])
+        del unflagged[idx]
+        k += 1
+    out_datapack = datapack.clone()
+    out_datapack.flag_directions(flag_patches)
+    log.info("flagged {}".format(flag_patches))
+    return out_datapack
+
+
+
 def select_facets(N,datapack,dir_idx=-1,time_idx=-1):
     '''Will select N uniform assembly of antennas and return a datapack
     with the rest flagged'''

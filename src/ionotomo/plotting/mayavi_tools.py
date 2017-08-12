@@ -76,3 +76,81 @@ def plot_tci(tci,rays=None,filename=None,show=False):
     mlab.close(all=True)
 
 
+def plot_wavefront(tci,rays,save=False,saveFile=None,animate=False):
+    '''Plots a tci and isochrones (or steps) along rays.
+    It then saves the figures and creates an animation'''
+    if saveFile is None:
+        saveFile = "figs/wavefront.png"
+    print("Saving to: {0}".format(saveFile))
+    xmin = tci.xvec[0]
+    xmax = tci.xvec[-1]
+    ymin = tci.yvec[0]
+    ymax = tci.yvec[-1]
+    zmin = tci.zvec[0]
+    zmax = tci.zvec[-1]
+    
+    X,Y,Z = np.mgrid[xmin:xmax:len(tci.xvec)*1j,
+                     ymin:ymax:len(tci.yvec)*1j,
+                     zmin:zmax:len(tci.zvec)*1j]
+    
+    #reshape array
+    data = tci.get_shaped_array()
+    #print(np.mean(data),np.max(data),np.min(data))
+    #mlab.close()
+    #l = mlab.pipeline.volume(mlab.pipeline.scalar_field(X,Y,Z,data))#,vmin=min, vmax=min + .5*(max-min))
+    #l._volume_property.scalar_opacity_unit_distance = min((xmax-xmin)/4.,(ymax-ymin)/4.,(zmax-zmin)/4.)
+    #l._volume_property.shade = False
+    mlab.contour3d(X,Y,Z,data,contours=10,opacity=0.2)
+    mlab.colorbar()
+    
+    def getWave(rays,idx):
+        xs = np.zeros(len(rays))
+        ys = np.zeros(len(rays))
+        zs = np.zeros(len(rays))
+        ridx = 0
+        while ridx < len(rays):
+            xs[ridx] = rays[ridx]['x'][idx]
+            ys[ridx] = rays[ridx]['y'][idx]
+            zs[ridx] = rays[ridx]['z'][idx]
+            ridx += 1
+        return xs,ys,zs
+    
+    if rays is not None:
+        for datum_idx in range(len(rays)):
+            ray = rays[datum_idx]
+            mlab.plot3d(ray["x"],ray["y"],ray["z"],tube_radius=0.75)
+        if animate:
+            plt = mlab.points3d(*getWave(rays,0),color=(1,0,0),scale_mode='vector', scale_factor=10.)
+            #mlab.move(-200,0,0)
+            view = mlab.view()
+            @mlab.animate(delay=100)
+            def anim():
+                nt = len(rays[0]["s"])
+                f = mlab.gcf()
+                save = False
+                while True:
+                    i = 0
+                    while i < nt:
+                        #print("updating scene")
+                        xs,ys,zs = getWave(rays,i)
+                        plt.mlab_source.set(x=xs,y=ys,z=zs)
+                        #mlab.view(*view)
+                        if save:
+                            #mlab.view(*view)
+                            mlab.savefig('figs/wavefronts/wavefront_{0:04d}.png'.format(i))#,magnification = 2)#size=(1920,1080))
+                        #f.scene.render()
+                        i += 1
+                        yield
+                    save = False
+            anim()
+    
+    if save and animate:
+        import os
+        os.system('ffmpeg -r 10 -f image2 -s 1900x1080 -i figs/wavefronts/wavefront_%04d.png -vcodec libx264 -crf 25  -pix_fmt yuv420p figs/wavefronts/wavefront.mp4')
+    else:
+        if save:
+            mlab.savefig(saveFile,figure=mlab.gcf())
+        else:
+            mlab.show()
+            
+          

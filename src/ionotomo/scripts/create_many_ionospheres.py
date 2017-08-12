@@ -29,17 +29,21 @@ def run(output_folder):
     log.info("Generating a number of ionospheres")
     #using lofar configuration generate for a number of random pointings and times
     radio_array = generate_example_radio_array(config='lofar')
-    info = open("{}/info".format(output_folder),'w')
-    info.write("#time alt az corr datapack_filename tci_filename\n")
+    info_file = os.path.join(output_folder,"info")
+    if os.path.exists(info_file) and os.path.isfile(info_file):
+        info = open(info_file,'a')
+    else:
+        info = open(info_file,'w')
+        info.write("#time alt az corr datapack_filename tci_filename\n")
     for time in ["2017-08-02T00:00:00.000","2017-08-02T06:00:00.000","2017-08-02T12:00:00.000","2017-08-02T18:00:00.000"]:
         for alt in [30.,50.,70.,90.]:
             for az in [0.,90.,180.,270.]:
                 datapack = phase_screen_datapack(10,alt=alt,az=az,radio_array=radio_array,time=time)
-                datapack = select_antennas(10,datapack)
-                datapack_filename=os.path.join(datapack_folder,"datapack_{}_{:.2f}_{:.2f}.hdf5".format(time,alt,az))
-                datapack.save(datapack_filename)
+                datapack = select_antennas(15,datapack)
                 seed = int(clock())
                 for corr in [10.,20.,30.,40.,50.,60.,70.,80.,90.,100.]:
+                    datapack_filename=os.path.join(datapack_folder,"datapack_{}_{:.2f}_{:.2f}_{:.2f}.hdf5".format(time,alt,az,corr))
+                    datapack.save(datapack_filename)
                     pert_tci = create_turbulent_model(datapack,corr=corr,seed=seed)
                     tci_filename=os.path.join(tci_folder,"ionosphere_{}_{:.2f}_{:.2f}_{:.2f}.hdf5".format(time,alt,az,corr))
                     log.info("{} {} {} {} {} {}\n".format(time,alt,az,corr,datapack_filename,tci_filename))
@@ -48,4 +52,4 @@ def run(output_folder):
     info.close()
 
 if __name__=='__main__':
-    run("output")
+    run("output_quiet")

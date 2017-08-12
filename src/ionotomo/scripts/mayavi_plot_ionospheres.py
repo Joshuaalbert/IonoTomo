@@ -15,10 +15,13 @@ def run(output_folder):
     except:
         pass
     log.info("Plotting generated ionospheres")
-    files = np.genfromtxt(os.path.join(output_folder,"info"),dtype='str',usecols=[5])
-    for file in files:
+    info_file = os.path.join(output_folder,"info")
+    tci_files = np.genfromtxt(info_file,dtype='str',usecols=[5])
+    for tci_file in tci_files:
     #    file = str(file,'utf-8')
-        tci = TriCubic(filename=os.path.join(tci_folder,file))
-        plot_tci(tci,filename=os.path.join(plot_folder,file.split('.hdf5')[0]))
+        tci = TriCubic(filename=os.path.join(tci_folder,tci_file))
+        tci_plot = os.path.join(plot_folder,tci_file.split(os.sep)[-1].split('.hdf5')[0])
+
+        plot_tci(tci,filename=tci_plot)
 if __name__=='__main__':
     run('output')

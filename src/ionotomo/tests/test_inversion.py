@@ -103,7 +103,6 @@ def test_gradient():
     d = forward_equation(rays,K_ne,m_tci,i0)
     
     cov_obj = Covariance(ne_tci,np.log(10),20.,2./3.)
-    cov_obj = None
     CdCt = (0.01*np.ones(dobs.shape))**2
 
 #    t1 = clock()

@@ -39,7 +39,7 @@ def turbulent_perturbation(tci,sigma = 3.,corr = 20., nu = 5./2.):
     return B
     
 
-def create_initial_model(datapack,ant_idx = -1, time_idx = -1, dir_idx = -1, zmax = 1000.,spacing=5.,padding=20):
+def create_initial_model(datapack,ant_idx = -1, time_idx = -1, dir_idx = -1, zmax = 1000.,spacing=5.,padding=20,thin_f = False):
     antennas,antenna_labels = datapack.get_antennas(ant_idx = ant_idx)
     patches, patch_names = datapack.get_directions(dir_idx=dir_idx)
     times,timestamps = datapack.get_times(time_idx=time_idx)
@@ -62,15 +62,16 @@ def create_initial_model(datapack,ant_idx = -1, time_idx = -1, dir_idx = -1, zma
     log.info("Nx={} Ny={} Nz={} number of cells: {}".format(len(xvec),len(yvec),len(zvec),np.size(X)))
     coords = ac.SkyCoord(X.flatten()*au.km,Y.flatten()*au.km,Z.flatten()*au.km,frame=uvw).transform_to('itrs').earth_location.to_geodetic('WGS84')
     heights = coords[2].to(au.km).value#height in geodetic
-    ne_model = a_priori_model(heights,zenith).reshape(X.shape)
+    ne_model = a_priori_model(heights,zenith,thin_f=thin_f).reshape(X.shape)
     ne_model[ne_model<4e7] = 4e7
     return TriCubic(xvec,yvec,zvec,ne_model)
 
-def create_turbulent_model(datapack,corr=20.,ant_idx = -1, time_idx = -1, dir_idx = -1, zmax = 1000., spacing=5., padding=20,seed=None):
+def create_turbulent_model(datapack,corr=20.,seed=None, **initial_model_kwargs):
     if seed is not None:
         np.random.seed(seed)
-    ne_tci = create_initial_model(datapack,ant_idx = ant_idx, time_idx = time_idx, dir_idx = dir_idx, zmax = zmax, spacing= spacing,padding=padding)
-    dn_max = np.sqrt(1 - 8.98**2 * 5e11/datapack.radio_array.frequency**2) - np.sqrt(1 - 8.98**2 * 1e12/datapack.radio_array.frequency**2)
+    #ne_tci = create_initial_model(datapack,ant_idx = ant_idx, time_idx = time_idx, dir_idx = dir_idx, zmax = zmax, spacing= spacing,padding=padding)
+    ne_tci = create_initial_model(datapack,**initial_model_kwargs)
+    dn_max = np.sqrt(1 - 8.98**2 * 1e10/datapack.radio_array.frequency**2) - np.sqrt(1 - 8.98**2 * 5e10/datapack.radio_array.frequency**2)
     log.info("Max dn {}".format(dn_max))
     n_max = np.sqrt(1 - 8.98**2 * 4e7/datapack.radio_array.frequency**2)
     dn = turbulent_perturbation(ne_tci,sigma=dn_max/2.,corr=corr,nu=2./3.)

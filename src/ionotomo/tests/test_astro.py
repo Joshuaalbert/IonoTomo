@@ -2,7 +2,27 @@ import numpy as np
 from ionotomo.astro.antenna_facet_selection import *
 from ionotomo.astro.real_data import *
 from ionotomo.astro.radio_array import *
+from ionotomo.astro.fit_tec_2d import *
 import os
+
+def test_fit_tec_2d():
+    max_res = []
+    grid = []
+    for g in np.arange(10)*10:
+        xstar = np.linspace(0,1,10)
+        Xstar,Ystar = np.meshgrid(xstar,xstar,indexing='ij')
+        xstar = np.array([Xstar.flatten(),Ystar.flatten()]).T
+        x = np.linspace(0,1,int(g)+2)
+        X,Y = np.meshgrid(x,x,indexing='ij')
+        x = np.array([X.flatten(),Y.flatten()]).T
+        y = X**2 + np.exp(Y)**2
+        ystar = fit_2d_cubic(x,y.flatten(),xstar)
+        res = ystar - (xstar[:,0]**2 + np.exp(xstar[:,1])**2)
+        grid.append(g)
+        max_res.append(np.max(np.abs(res)))
+    print(max_res)
+
+
 
 def test_radio_array():
     print("Test radio array")
