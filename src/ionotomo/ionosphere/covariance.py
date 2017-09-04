@@ -36,6 +36,10 @@ class Covariance(object):
         n = 3.
         self.f  = sigma**2*2**(n) * np.pi**(n/2.) * gamma(nu+n/2.) * (2*nu)**(nu) / gamma(nu) / corr**(2*nu) * (2*nu/corr**2 + 4*np.pi**2*self.r**2)**(-nu - n/2.)
 
+    def __call__(self,dx,dy,dz):
+        '''Return the covariance (stationary) evaluated at the given dx,dy,dz'''
+        return np.zeros(dx.shape,dtype=float)
+
     def realization(self):
         '''Generate a Gaussian Random field with given covariance'''
         B = np.random.normal(size=[self.nx,self.ny, self.nz])

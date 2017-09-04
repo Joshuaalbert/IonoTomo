@@ -82,7 +82,7 @@ class TriCubic(object):
     
     def get_model_coordinates(self):
         X,Y,Z = np.meshgrid(self.xvec,self.yvec,self.zvec,indexing='ij')
-        return X.ravel(order='C'),Y.ravel(order='C'),Z.ravel(order='C')
+        return X.flatten(order='C'),Y.flatten(order='C'),Z.flatten(order='C')
        
 def bisection(array,value):
     '''Given an ``array`` , and given a ``value`` , returns an index j such that ``value`` is between array[j]
