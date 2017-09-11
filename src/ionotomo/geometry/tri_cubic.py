@@ -18,7 +18,7 @@ class TriCubic(object):
             self.yvec = yvec
             self.zvec = zvec
             self.M = M
-            self.rgi = RegularGridInterpolator((self.xvec,self.yvec,self.zvec),self.M)
+            self.rgi = RegularGridInterpolator((self.xvec,self.yvec,self.zvec),self.M, bounds_error=True)
     
     @property
     def xvec(self):
@@ -52,10 +52,16 @@ class TriCubic(object):
         assert val.shape[2] == len(self.zvec)
         assert not np.any(np.isnan(val)) and not np.any(np.isinf(val))
         self._M = val
-        self.rgi = RegularGridInterpolator((self.xvec,self.yvec,self.zvec),self.M)
+        self.rgi = RegularGridInterpolator((self.xvec,self.yvec,self.zvec),self.M,bounds_error=True)
 
     def interp(self,x,y,z):
         return np.reshape(self.rgi(np.array([x,y,z]).T),np.shape(x))
+    def extrapolate(self,x,y,z):
+        self.rgi = RegularGridInterpolator((self.xvec,self.yvec,self.zvec),self.M,bounds_error=False,fill_value=None)
+        res = self.interp(x,y,z)
+        self.rgi = RegularGridInterpolator((self.xvec,self.yvec,self.zvec),self.M,bounds_error=True)
+        return res
+
     def copy(self,**kwargs):
         '''Return a copy of the TriCubic object by essentially creating a copy of all the data. 
         ``kwargs`` are the same as constructor.'''

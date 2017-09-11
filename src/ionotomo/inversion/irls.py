@@ -35,9 +35,8 @@ def calc_S(CdCt, ne_tci, covariance, rays, i0):
                 Cmne = np.einsum('ijkl,l->ijkl',Cm,ne_tci.interp(rays[i,j,k,0,:],rays[i,j,k,1,:],rays[i,j,k,2,:]))
                 integrand1 = simps(Cmne,rays[i,j,k,3,:],axis=3)
                 integrand1 -= integrand1[i0,:,:]
-                integrand2 = simps(integrand1*ne_tci.interp(
                 res[k + Nd*(j + Nt*i),k + Nd*(j + Nt*i):] = integrand.flatten()
-                res[k + Nd*(j + Nt*i): , k + Nd * (j + Nt * i)] = res[k + Nd*(j + Nt*i),k + Nd*(j + Nt*i):]
+                res[k + Nd*(j + Nt*i) : , k + Nd * (j + Nt * i)] = res[k + Nd*(j + Nt*i),k + Nd*(j + Nt*i) :]
                 k += 1
             j += 1
         i += 1
@@ -116,3 +115,54 @@ def irls_step(m_n,m_prior,K_ne,rays,tci,covariance,CdCt, dobs,i0):
             k += 1
         j += 1
     return out
+
+def irls_solve(ne_0,ne_prior,rays,covariance,CdCt, dobs,i0):
+    '''solve using IRLS.
+    ne_0 is a Solution object,
+    ne_prior is a Solution object'''
+    #convergence conditions
+    factr = 1e7
+    pgtol = 1e-2
+    eps = np.finfo(float).eps
+    max_iter = 20
+    #
+    tci = ne_0.tci
+    m_n = tci.M.flatten()
+    K_ne = np.median(m_n)
+    np.log(m_n/K_ne,out=m_n)
+    m_prior = ne_prior.tci.M.flatten()/K_ne
+    np.log(m_prior,out=m_prior)
+    #initial conditions
+    m_n = tci.M.flatten()
+    m_np1 = m_n
+    n_e = np.exp(m_n)
+    n_e *= K_ne/TECU
+    tci.M = (n_e).reshape((tci.nx,tci.ny,tci.nz))
+    g = simps(tci.interp(rays[:,:,:,0,:],rays[:,:,:,1,:],rays[:,:,:,2,:]),rays[:,:,:,3,:],axis=3)
+    g -= g[i0,:,:]
+    S_n = np.sum((dobs - g)**2/(CdCt + 1e-15))
+    S_np1 = S_n
+    iter = 0
+    while ((S_n - S_np1)/max(np.abs(S_n),np.abs(S_np1),1.) > factr*eps and np.max(np.abs(m_n - m_np1)) > pgtol and iter < max_iter) or iter < 1:
+        m_n = m_np1
+        S_n = S_np1
+        #step
+        m_np1 = irls_step(m_n,m_prior,K_ne,rays,tci,covariance,CdCt, dobs,i0)
+        #L2 neg log like
+        n_e = np.exp(m_np1)
+        n_e *= K_ne/TECU
+        tci.M = (n_e).reshape((tci.nx,tci.ny,tci.nz))
+        g = simps(tci.interp(rays[:,:,:,0,:],rays[:,:,:,1,:],rays[:,:,:,2,:]),rays[:,:,:,3,:],axis=3)
+        g -= g[i0,:,:]
+        S_np1 = np.sum((dobs - g)**2/(CdCt + 1e-15))
+        iter += 1
+    
+    if ((S_n - S_np1)/max(np.abs(S_n),np.abs(S_np1),1.) > factr*eps and np.max(np.abs(m_n - m_np1)) > pgtol):
+        convergence = False
+        log.info("IRLS solve did not converge")
+    else:
+        convergence = True
+        log.info("IRLS solve converged")
+    assert convergence,"Did not converge"
+    ne_sol = Solution(tci.copy(),pointing_frame=m_0.pointing_frame)
+    return ne_sol

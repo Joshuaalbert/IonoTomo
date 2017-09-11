@@ -13,18 +13,18 @@ from ionotomo.astro.frames.uvw_frame import UVW
 from ionotomo.astro.frames.pointing_frame import Pointing
 
 
-
-def get_datum_idx(ant_idx,time_idx,dir_idx,num_ant,num_time):
-    '''standarizes indexing'''
-    idx = ant_idx + num_ant*(time_idx + num_time*dir_idx)
-    return idx
-
-def get_datum(datum_idx,num_ant,num_time):
-    ant_idx = datum_idx % num_ant
-    time_idx = (datum_idx - ant_idx)/num_ant % num_time
-    dir_idx = (datum_idx - ant_idx - num_ant*time_idx)/num_ant/num_time
-    return ant_idx,time_idx,dir_idx
-
+#
+#def get_datum_idx(ant_idx,time_idx,dir_idx,num_ant,num_time):
+#    '''standarizes indexing'''
+#    idx = ant_idx + num_ant*(time_idx + num_time*dir_idx)
+#    return idx
+#
+#def get_datum(datum_idx,num_ant,num_time):
+#    ant_idx = datum_idx % num_ant
+#    time_idx = (datum_idx - ant_idx)/num_ant % num_time
+#    dir_idx = (datum_idx - ant_idx - num_ant*time_idx)/num_ant/num_time
+#    return ant_idx,time_idx,dir_idx
+#
 class DataPack(object):
     '''data_dict = {'radio_array':radio_array,'antennas':outAntennas,'antenna_labels':outAntennaLabels,
                     'times':outTimes,'timestamps':outTimestamps,
@@ -316,6 +316,7 @@ class DataPack(object):
         self.Nt = len(self.times)        
 
 def generate_example_datapack(Nant = 10, Ntime = 1, Ndir = 10, fov = 4., alt = 90., az=0., time = None, radio_array=None):
+    '''Generate a datapack suitable for testing purposes, if time is None then use current time'''
     if radio_array is None:
         radio_array = generate_example_radio_array(Nant=Nant)
     if time is None:
@@ -345,6 +346,10 @@ def generate_example_datapack(Nant = 10, Ntime = 1, Ndir = 10, fov = 4., alt = 9
 
 
 def phase_screen_datapack(N,Nant = 10, Ntime = 1, fov = 4., alt = 90., az=0., time = None, radio_array=None,datapack=None):
+    """Generate an empty datapack with N points in a grid pointing at alt (90 deg) and az (0 deg).
+    The number of antennas and times are given by Nant and Ntime.
+    field of view (fov) is by default 4 degrees.
+    If time is None use current time."""
     if datapack is None:
         datapack = generate_example_datapack(Nant = Nant, Ntime = Ntime, Ndir = 1, fov = fov, alt = alt, az=az, time = time, radio_array=radio_array)
     antennas,antenna_labels = datapack.get_antennas(ant_idx = -1)
@@ -354,7 +359,7 @@ def phase_screen_datapack(N,Nant = 10, Ntime = 1, fov = 4., alt = 90., az=0., ti
     fixtime = times[Nt>>1]
     phase = datapack.get_center_direction()
     array_center = datapack.radio_array.get_center()
-    uvw = UVW(location = datapack.radio_array.get_center(),obstime=time,phase=phase)
+    uvw = UVW(location = datapack.radio_array.get_center(),obstime=fixtime,phase=phase)
     uvec = np.linspace(-fov/2.,fov/2.,N)*np.pi/180.
     dirs = []
     for theta1 in uvec:
@@ -366,7 +371,8 @@ def phase_screen_datapack(N,Nant = 10, Ntime = 1, fov = 4., alt = 90., az=0., ti
     dirs = ac.SkyCoord(u = dirs[:,0], v = dirs[:,1], w = dirs[:,2],frame=uvw).transform_to(ac.ICRS)
     patch_names = np.array(["facet_patch_{}".format(i) for i in range(len(dirs))])
     
-    dtec = np.random.normal(size=[Na,Nt,len(dirs)])
+#    dtec = np.random.normal(size=[Na,Nt,len(dirs)])
+    dtec = np.zeros([Na,Nt,len(dirs)])
     data_dict = {'radio_array':datapack.radio_array,'antennas':antennas,'antenna_labels':antenna_labels,
                     'times':times,'timestamps':times.isot,
                     'directions':dirs,'patch_names':patch_names,'dtec':dtec}

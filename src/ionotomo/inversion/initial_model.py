@@ -4,7 +4,8 @@ import numpy as np
 from ionotomo.astro.frames.uvw_frame import UVW
 from ionotomo.ionosphere.iri import a_priori_model
 from ionotomo.geometry.tri_cubic import TriCubic
-from ionotomo.ionosphere.covariance import Covariance
+from ionotomo.ionosphere.simulation import IonosphereSimulation
+from ionotomo.inversion.solution import Solution
 
 import logging as log
 
@@ -34,10 +35,9 @@ def determine_inversion_domain(spacing,antennas, directions, pointing, zmax, pad
     return uvec,vvec,wvec
 
 def turbulent_perturbation(tci,sigma = 3.,corr = 20., nu = 5./2.):    
-    cov_obj = Covariance(tci,sigma,corr,nu)
+    cov_obj = IonosphereSimulation(tci,sigma,corr,nu)
     B = cov_obj.realization()
     return B
-    
 
 def create_initial_model(datapack,ant_idx = -1, time_idx = -1, dir_idx = -1, zmax = 1000.,spacing=5.,padding=20,thin_f = False):
     antennas,antenna_labels = datapack.get_antennas(ant_idx = ant_idx)
@@ -92,4 +92,15 @@ def create_turbulent_model(datapack,corr=20.,seed=None, **initial_model_kwargs):
     pert_tci = TriCubic(ne_tci.xvec,ne_tci.yvec,ne_tci.zvec,ne)
     return pert_tci
 
-
+def create_initial_solution(datapack,ant_idx = -1, time_idx = -1, dir_idx = -1, zmax = 1000.,spacing=5.,padding=20,thin_f = False):
+    tci = create_initial_model(datapack,ant_idx = ant_idx, time_idx = time_idx, dir_idx = dir_idx, zmax = zmax,spacing=spacing,padding=padding,thin_f = thin_f)
+    antennas,antenna_labels = datapack.get_antennas(ant_idx = ant_idx)
+    patches, patch_names = datapack.get_directions(dir_idx=dir_idx)
+    times,timestamps = datapack.get_times(time_idx=time_idx)
+    Na = len(antennas)
+    Nt = len(times)
+    Nd = len(patches)  
+    phase = datapack.get_center_direction()
+    fixtime = times[Nt>>1]
+    pointing = Pointing(location = datapack.radio_array.get_center().earth_location,obstime = times[0], fixtime=fixtime,phase = phase)
+    return Solution(tci=tci,pointing_frame=pointing)

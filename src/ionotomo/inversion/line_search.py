@@ -7,8 +7,8 @@
 import numpy as np
 import pylab as plt
 
-from ForwardEquation import forward_equation, forward_equation_dask
-from tri_cubic import TriCubic
+from ionotomo.inversion.forward_equation import forward_equation, forward_equation_dask
+from ionotomo.geometry.tri_cubic import TriCubic
 
 def vertex(x1,x2,x3,y1,y2,y3):
     '''Given three pairs of (x,y) points return the vertex of the

@@ -6,6 +6,7 @@ from dask import delayed
 import dask.array as da
 
 from ionotomo.inversion.fermat import Fermat
+from ionotomo.inversion.solution import *
 from ionotomo.astro.frames.pointing_frame import Pointing
 from ionotomo.astro.real_data import DataPack
 from ionotomo.geometry.tri_cubic import TriCubic
@@ -102,6 +103,8 @@ def merge_rays(*ray_bundles):
 
 def calc_rays_dask(antennas,patches,times, array_center, fixtime, phase, ne_tci, frequency,  straight_line_approx,tmax, N= None, get=None):
     '''Do rays in parallel processes batch by directions'''
+    if isinstance(ne_tci,Solution):
+        ne_tci = ne_tci.tci
     if get is None:
         get = Client().get
     if N is None:
@@ -133,6 +136,8 @@ def calc_rays_dask(antennas,patches,times, array_center, fixtime, phase, ne_tci,
 
 def calc_rays(antennas,patches,times, array_center, fixtime, phase, ne_tci, frequency,  straight_line_approx,tmax, N=None):
     '''Do rays in parallel processes batch by directions'''
+    if isinstance(ne_tci,Solution):
+        ne_tci = ne_tci.tci
     if N is None:
         N = ne_tci.nz
     Na = len(antennas)

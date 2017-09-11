@@ -1,56 +1,42 @@
 import numpy as np
 import pylab as plt
-from ionotomo.astro.real_data import generate_example_datapack
-#from ionotomo.geometry.tri_cubic import TriCubic
-from ionotomo.geometry.calc_rays import *
-#from ionotomo.inversion.forward_equation import *
-from ionotomo.inversion.initial_model import *
+from ionotomo import *
 from ionotomo.inversion.gradient import *
-from ionotomo.inversion.inversion_pipeline import *
-from ionotomo.inversion.lbfgs_solver import LBFGSSolver
-from ionotomo.inversion.forward_equation import *
-from time import clock
+
 
 def test_inversion_pipeline():
+    datapack = generate_example_datapack(Ntime = 4)
+    p = InversionPipeline(datapack,coherence_time=16.)
+    p.preprocess()
+    assert len(p.datapack.timestamps)==p.datapack.dtec.shape[1]
+    p.run()
+
+def test_solution():
     return
     datapack = generate_example_datapack()
-    p = InversionPipeline(datapack,LBFGSSolver)
-    p.run()
+    phase = datapack.get_center_direction()
+    times,timestamps = datapack.get_times(time_idx=-1)
+    Nt = len(times)
+    obstime = times[0]
+    fixtime = times[Nt >> 1]
+    tci = create_initial_model(datapack)
+    pointing = Pointing(location = datapack.radio_array.get_center().earth_location,obstime = obstime, fixtime=fixtime, phase = phase)
+    solution = Solution(tci=tci,pointing_frame = pointing)
+    solution.save("test_solution.hdf5")
+    solution2 = Solution(filename="test_solution.hdf5")
+    assert np.all(solution.M == solution2.M)
+    assert solution.pointing_frame.obstime.gps == solution2.pointing_frame.obstime.gps
+    assert solution.pointing_frame.fixtime.gps == solution2.pointing_frame.fixtime.gps
+    import astropy.units as au
+    assert np.allclose(solution.pointing_frame.location.to(au.km).value, solution2.pointing_frame.location.to(au.km).value)
+    assert np.all(solution.pointing_frame.phase.cartesian.xyz.value == solution2.pointing_frame.phase.cartesian.xyz.value)
 
 def test_initial_model():
     return
     datapack = generate_example_datapack()
     ne_tci = create_initial_model(datapack)
     pert_tci = create_turbulent_model(datapack)
-    #pert_tci.M -= ne_tci.M
-    pert_tci.save("pert_tci.hdf5")
-    #import pylab as plt
-    #plt.hist(pert_tci.M.flatten(),bins = int(np.sqrt(np.size(pert_tci.M))))
-    #plt.show()
 
-def test_calc_rays():
-    return
-    datapack = generate_example_datapack()
-    ne_tci = create_initial_model(datapack)
-    antennas,antenna_labels = datapack.get_antennas(ant_idx = -1)
-    patches, patch_names = datapack.get_directions(dir_idx=-1)
-    times,timestamps = datapack.get_times(time_idx=-1)
-    Na = len(antennas)
-    Nt = len(times)
-    Nd = len(patches)  
-    fixtime = times[Nt>>1]
-    phase = datapack.get_center_direction()
-    array_center = datapack.radio_array.get_center()
-    t1 = clock()
-    rays1 = calc_rays(antennas,patches,times, array_center, fixtime, phase, ne_tci, 120e6, True, 1000, 1000)
-    #print(clock() - t1)
-    t1 = clock()
-    rays2 = calc_rays_dask(antennas,patches,times, array_center, fixtime, phase, ne_tci, 120e6, True, 1000, 1000)
-    #print(clock() - t1)
-    print("Num of rays calculated: {}".format(rays1.shape[0]*rays1.shape[1]*rays1.shape[2]))
-    assert np.all(rays1==rays2),"Not same result"
-    assert rays1.shape[0] == Na and rays1.shape[1] == Nt and rays1.shape[2] == Nd and rays1.shape[3] == 4 and rays1.shape[4] == 1000
-  
 def test_forward_equation():
     return
     datapack = generate_example_datapack()
@@ -71,7 +57,6 @@ def test_forward_equation():
     #print(m_tci.M)
     i0 = 0
     d = forward_equation(rays,K_ne,m_tci,i0)
-    #print (np.any(np.isnan(m_tci.M)))
     assert d.shape[0] == Na and d.shape[1] == Nt and d.shape[2] == Nd
     assert not np.any(np.isnan(d))
     d_dask = forward_equation_dask(rays,K_ne, m_tci,i0)
@@ -82,10 +67,9 @@ def test_forward_equation():
     t1 = clock()
     res = [forward_equation_dask(rays,K_ne,m_tci,i0) for i in range(10)]
     print("Average time (dask) {}s".format((clock() - t1)/10.))
-
-    
     
 def test_scipy_bfgs_inversion():
+    return
     datapack = generate_example_datapack()
     antennas,antenna_labels = datapack.get_antennas(ant_idx = -1)
     patches, patch_names = datapack.get_directions(dir_idx = -1)
