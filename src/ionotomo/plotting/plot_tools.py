@@ -21,6 +21,11 @@ import astropy.coordinates as ac
 import astropy.time as at
 import astropy.units as au
 ## utility functions
+try:
+    import cmocean
+    phase_cmap = cmocean.cm.phase
+except:
+    phase_cmap = plt.cm.hsv
 
 def interp_nearest(x,y,z,x_,y_):
     dx = np.subtract.outer(x_,x)
@@ -186,96 +191,150 @@ def animate_tci_slices(TCI,output_folder,num_seconds=10.):
     make_animation(output_folder,prefix='fig',fps=int(TCI.nz/float(num_seconds)))        
 
   
-def plot_datapack(datapack,ant_idx=-1,time_idx=[0], dir_idx=-1,figname=None,vmin=None,vmax=None):
+def plot_datapack(datapack,ant_idx=-1,time_idx=[0], dir_idx=-1,freq_idx=-1,figname=None,vmin=None,vmax=None,mode='perantenna',observable='phase'):
+    '''Plot phase at central frequency'''
     assert datapack.ref_ant is not None, "set DataPack ref_ant first"
+    if len(time_idx) == 1 and figname is not None:
+        figname = [figname]
+    if len(time_idx) > 1 and figname is not None:
+        assert len(time_idx) == len(figname)
     directions, patch_names = datapack.get_directions(dir_idx=dir_idx)
     antennas, antLabels = datapack.get_antennas(ant_idx=ant_idx)
     times,timestamps = datapack.get_times(time_idx=time_idx)
-    dtec = np.stack([np.mean(datapack.get_dtec(ant_idx = ant_idx,dir_idx=dir_idx,time_idx=time_idx),axis=1)],axis=1)
+    freqs = datapack.get_freqs(freq_idx=freq_idx)
+    if observable == 'phase':
+        phase_obs = np.angle(np.exp(1j*datapack.get_phase(ant_idx = ant_idx,dir_idx=dir_idx,time_idx=time_idx, freq_idx = freq_idx)))
+    elif observable == 'prop':
+        phase_obs = np.angle(np.exp(1j*datapack.get_prop(ant_idx = ant_idx,dir_idx=dir_idx,time_idx=time_idx, freq_idx = freq_idx)))
+
     Na = len(antennas)
     Nt = len(times)
     Nd = len(directions)
+    Nf = len(freqs)
     ref_ant_idx = None
     for i in range(Na):
         if antLabels[i] == datapack.ref_ant:
             ref_ant_idx = i
-    fixtime = times[Nt>>1]
-    phase = datapack.get_center_direction()
-    array_center = datapack.radio_array.get_center()
-    uvw = UVW(location = array_center.earth_location,obstime = fixtime,phase = phase)
-    ants_uvw = antennas.transform_to(uvw)
-
-    #make plots, M by 4
-    M = (Na>>2) + 1 + 1
-    fig = plt.figure(figsize=(11.,11./4.*M))
-    #use direction average as phase tracking direction
-    if vmax is None:  
-        vmax = np.percentile(dtec.flatten(),99)
-        #vmax=np.max(dtec)
-    if vmin is None:
-        vmin = np.percentile(dtec.flatten(),1)
-        #vmin=np.min(dtec)
-    
-        
-    N = 25
-    dirs_uvw = directions.transform_to(uvw)
-    factor300 = 300./dirs_uvw.w.value
-    U,V = np.meshgrid(np.linspace(np.min(dirs_uvw.u.value*factor300),np.max(dirs_uvw.u.value*factor300),N),
-                          np.linspace(np.min(dirs_uvw.v.value*factor300),np.max(dirs_uvw.v.value*factor300),N))
-    
-    i = 0 
-    while i < Na:
-        ax = fig.add_subplot(M,4,i+1)
-
-        dx = np.sqrt((ants_uvw.u[i] - ants_uvw.u[ref_ant_idx])**2 + (ants_uvw.v[i] - ants_uvw.v[ref_ant_idx])**2).to(au.km).value
-        ax.annotate(s="{} : {:.2g} km".format(antLabels[i],dx),xy=(.2,.8),xycoords='axes fraction')
-        if i == 0:
-            #ax.annotate(s="{} : {:.2g} km\n{}".format(antLabels[i],dx,fixtime.isot),xy=(.2,.8),xycoords='axes fraction')
-            #ax.annotate(s=fixtime.isot,xy=(.2,0.05),xycoords='axes fraction')
-            ax.set_title(fixtime.isot)
-        #ax.set_title("Ref. Proj. Dist.: {:.2g} km".format(dx))
-        ax.set_xlabel("U km")
-        ax.set_ylabel("V km")
-        
+    for idx,j in enumerate(time_idx):
+        print("Plotting {}".format(j))
+        fixtime = times[idx]
+        fixfreq = freqs[Nf>>1]
+        phase = datapack.get_center_direction()
+        array_center = datapack.radio_array.get_center()
+        uvw = UVW(location = array_center.earth_location,obstime = fixtime,phase = phase)
+        ants_uvw = antennas.transform_to(uvw)
+        dirs_uvw = directions.transform_to(uvw)
+        if mode == 'perantenna':
+            #make plots, M by M
+            M = int(np.ceil(np.sqrt(Na)))
+            fig = plt.figure(figsize=(4*M,4*M))
+            #use direction average as phase tracking direction
+            vmax = np.pi
+            vmin = -np.pi
             
-        
-        D = interp_nearest(dirs_uvw.u.value*factor300,dirs_uvw.v.value*factor300,dtec[i,0,:],U.flatten(),V.flatten()).reshape(U.shape)
-        im = ax.imshow(D,origin='lower',extent=(np.min(U),np.max(U),np.min(V),np.max(V)),aspect='auto',
-                      vmin = vmin, vmax= vmax,cmap=plt.cm.coolwarm,alpha=1.)
-        sc1 = ax.scatter(dirs_uvw.u.value*factor300,dirs_uvw.v.value*factor300, c='black',
-                        marker='+')
-        i += 1
-    ax = fig.add_subplot(M,4,Na+1)
-    plt.colorbar(im,cax=ax,orientation='vertical')
-    if figname is not None:
-        plt.savefig("{}.png".format(figname),format='png')
-    else:
-        plt.show()
-    plt.close()
+            N = 25
+            
+            factor300 = 300./dirs_uvw.w.value
+            U,V = np.meshgrid(np.linspace(np.min(dirs_uvw.u.value*factor300),
+                np.max(dirs_uvw.u.value*factor300),N),
+                np.linspace(np.min(dirs_uvw.v.value*factor300),
+                    np.max(dirs_uvw.v.value*factor300),N),indexing='ij')
+            i = 0 
+            while i < Na:
+                ax = fig.add_subplot(M,M,i+1)
+
+                dx = np.sqrt((ants_uvw.u[i] - ants_uvw.u[ref_ant_idx])**2 + (ants_uvw.v[i] - ants_uvw.v[ref_ant_idx])**2).to(au.km).value
+                ax.annotate(s="{} : {:.2g} km".format(antLabels[i],dx),xy=(.2,.8),xycoords='axes fraction')
+                if i == 0:
+                    #ax.annotate(s="{} : {:.2g} km\n{}".format(antLabels[i],dx,fixtime.isot),xy=(.2,.8),xycoords='axes fraction')
+                    #ax.annotate(s=fixtime.isot,xy=(.2,0.05),xycoords='axes fraction')
+                    ax.set_title("Phase {} MHz : {}".format(fixfreq/1e6,fixtime.isot))
+                #ax.set_title("Ref. Proj. Dist.: {:.2g} km".format(dx))
+                ax.set_xlabel("Projected East km")
+                ax.set_ylabel("Projected West km")
+                
+                
+                D = interp_nearest(dirs_uvw.u.value*factor300,dirs_uvw.v.value*factor300,np.angle(np.exp(1j*phase_obs[i,idx,:,Nf>>1])),U.flatten(),V.flatten()).reshape(U.shape)
+                im = ax.imshow(D,origin='lower',extent=(np.min(U),np.max(U),np.min(V),np.max(V)),aspect='auto',
+                              vmin = vmin, vmax= vmax,cmap=phase_cmap,alpha=1.)
+                sc1 = ax.scatter(dirs_uvw.u.value*factor300,dirs_uvw.v.value*factor300, c='black',
+                                marker='+')
+                i += 1
+            fig.subplots_adjust(right=0.8)
+            cbar_ax = fig.add_axes([0.85, 0.15, 0.05, 0.7])
+            fig.colorbar(im, cax=cbar_ax,orientation='vertical')
+        elif mode == 'perdirection':
+            M = int(np.ceil(np.sqrt(Na)))
+            fig = plt.figure(figsize=(4*M,4*M))
+            #use direction average as phase tracking direction
+            vmax = np.pi
+            vmin = -np.pi
+
+            N = 25
+            
+            U,V = np.meshgrid(np.linspace(np.min(ants_uvw.u.to(au.km).value),
+                np.max(ants_uvw.u.to(au.km).value),N),
+                np.linspace(np.min(ants_uvw.v.to(au.km).value),
+                    np.max(ants_uvw.v.to(au.km).value),N),indexing='ij')
+            k = 0 
+            while k < Nd:
+                ax = fig.add_subplot(M,M,k+1)
+
+                #dx = np.sqrt((ants_uvw.u[i] - ants_uvw.u[ref_ant_idx])**2 + (ants_uvw.v[i] - ants_uvw.v[ref_ant_idx])**2).to(au.km).value
+                ax.annotate(s="{} : {} ".format(patch_names[k],directions[k]),xy=(.2,.8),xycoords='axes fraction')
+                if k == 0:
+                    #ax.annotate(s="{} : {:.2g} km\n{}".format(antLabels[i],dx,fixtime.isot),xy=(.2,.8),xycoords='axes fraction')
+                    #ax.annotate(s=fixtime.isot,xy=(.2,0.05),xycoords='axes fraction')
+                    ax.set_title("Phase {} MHz : {}".format(fixfreq/1e6,fixtime.isot))
+                #ax.set_title("Ref. Proj. Dist.: {:.2g} km".format(dx))
+                ax.set_xlabel("Projected East km")
+                ax.set_ylabel("Projected North km")
+                
+                
+                D = interp_nearest(ants_uvw.u.to(au.km).value,ants_uvw.v.to(au.km).value,np.angle(np.exp(1j*phase_obs[:,idx,k,Nf>>1])),U.flatten(),V.flatten()).reshape(U.shape)
+                im = ax.imshow(D,origin='lower',extent=(np.min(U),np.max(U),np.min(V),np.max(V)),aspect='auto',
+                              vmin = vmin, vmax= vmax,cmap=phase_cmap,alpha=1.)
+                sc1 = ax.scatter(ants_uvw.u.to(au.km).value,ants_uvw.v.to(au.km).value, c='black',
+                                marker='+')
+                k += 1
+            fig.subplots_adjust(right=0.8)
+            cbar_ax = fig.add_axes([0.85, 0.15, 0.05, 0.7])
+            fig.colorbar(im, cax=cbar_ax,orientation='vertical')
+
+
+        #plt.tight_layout()
+        if figname is not None:
+            plt.savefig("{}.png".format(figname[idx]),format='png')
+        else:
+            plt.show()
+        plt.close()
     
-def animate_datapack(datapack,output_folder, ant_idx=-1,time_idx=-1,dir_idx=-1):
+def animate_datapack(datapack,output_folder, ant_idx=-1,time_idx=-1,dir_idx=-1,num_threads=1,mode='perantenna',observable='phase'):
+    from dask.threaded import get
+    from functools import partial
     try:
         os.makedirs(output_folder)
     except:
         pass
-    antennas,antenna_labels = datapack.get_antennas(ant_idx = ant_idx)
-    patches, patch_names = datapack.get_directions(dir_idx = dir_idx)
     times,timestamps = datapack.get_times(time_idx=time_idx)
-    datapack.set_reference_antenna(antenna_labels[0])
-    #plot_datapack(datapack,ant_idx = ant_idx, time_idx = time_idx, dir_idx = dir_idx,figname='{}/dobs'.format(output_folder))
-    dobs = datapack.get_dtec(ant_idx = ant_idx, time_idx = time_idx, dir_idx = dir_idx)
-    vmin = np.percentile(dobs,1)
-    vmax = np.percentile(dobs,99)
-    Na = len(antennas)
     Nt = len(times)
-    Nd = len(patches) 
-    j = 0
-    idx = 0
-    while j < Nt:
-        fig = "{}/fig-{:04d}".format(output_folder,idx)
-        plot_datapack(datapack,ant_idx=ant_idx,time_idx=[j,j+1], dir_idx=dir_idx,figname=fig,vmin=vmin,vmax=vmax)
-        idx += 1
-        j += 2
-    make_animation(output_folder,prefix="fig".format(output_folder),fps=int(5.))
+#    j = 0
+#    idx = 0
+#    dsk = {}
+#    objective = []
+#    for thread in range(num_threads):
+#        figs = []
+#        time_idx = []
+#        for j in range(thread,Nt,num_threads):
+#            figs.append(os.path.join(output_folder,"fig-{:04d}".format(j)))
+#            time_idx.append(j)
+#        dsk[thread] = (partial(plot_datapack,ant_idx=ant_idx,time_idx=time_idx, dir_idx=dir_idx,figname=figs,mode=mode),datapack)
+#        objective.append(thread)
+    for j in range(Nt):
+        fig = os.path.join(output_folder,"fig-{:04d}".format(j))
+        plot_datapack(datapack,ant_idx=ant_idx,time_idx=[j], dir_idx=dir_idx,figname=fig,mode=mode,observable=observable)
+
+    #get(dsk,objective,num_workers=num_threads)
+    make_animation(output_folder,prefix="fig",fps=int(10))
 
 

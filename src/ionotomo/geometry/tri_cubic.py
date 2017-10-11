@@ -8,6 +8,7 @@ import numpy as np
 import h5py
 
 from scipy.interpolate import RegularGridInterpolator
+from scipy.integrate import simps
 
 class TriCubic(object):
     def __init__(self,xvec=None,yvec=None,zvec=None,M=None,filename=None):
@@ -47,13 +48,24 @@ class TriCubic(object):
         
     @M.setter
     def M(self,val):
+        assert not np.any(np.isnan(val)) and not np.any(np.isinf(val))
+        if len(val.shape) == 1:
+            self.M = val.reshape((len(self.xvec),len(self.yvec),len(self.zvec)))
+            return
         assert val.shape[0] == len(self.xvec)
         assert val.shape[1] == len(self.yvec)
         assert val.shape[2] == len(self.zvec)
-        assert not np.any(np.isnan(val)) and not np.any(np.isinf(val))
         self._M = val
-        self.rgi = RegularGridInterpolator((self.xvec,self.yvec,self.zvec),self.M,bounds_error=True)
+        self.rgi = RegularGridInterpolator((self.xvec,self.yvec,self.zvec),self.M,bounds_error=True)  
 
+    def inner(self,M,inplace=False):
+        '''Do the inner product of self.M with M'''
+        if not inplace:
+            M = M*self.M
+        else:
+            M *= self.M
+        return simps(simps(simps(M,self.zvec,axis=2),self.yvec,axis=1),self.xvec,axis=0)
+        
     def interp(self,x,y,z):
         return np.reshape(self.rgi(np.array([x,y,z]).T),np.shape(x))
     def extrapolate(self,x,y,z):

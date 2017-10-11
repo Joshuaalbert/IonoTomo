@@ -164,4 +164,7 @@ def test_pointing():
     #print(phaseTrack.transform_to(pointing))
     #from ENUFrame import ENU
     enu = ENU(location=loc,obstime=time)
-    #print(phaseTrack.transform_to(enu).transform_to(pointing))
+    east = ac.SkyCoord(1,0,0,frame=enu)
+    print(east.cartesian.xyz)
+    print(east.transform_to(pointing).cartesian.xyz)
+    print(phaseTrack.transform_to(pointing).cartesian.xyz)

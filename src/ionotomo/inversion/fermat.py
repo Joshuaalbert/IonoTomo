@@ -3,8 +3,10 @@ from scipy.integrate import odeint
 from ionotomo.geometry.tri_cubic import TriCubic
 
 class Fermat(object):
-    def __init__(self,ne_tci,frequency = 120e6,type='z',straight_line_approx=True):
-        '''Fermat principle. type = "s" means arch length is the indepedent variable
+    def __init__(self,ne_tci,frequency = 120e6,type='z',
+            straight_line_approx=True):
+        '''Fermat principle. type = "s" means arch length is the indepedent 
+        variable
         type="z" means z coordinate is the independent variable.'''
         self.type = type
         self.frequency = frequency#Hz
@@ -25,12 +27,15 @@ class Fermat(object):
         self._n_tci = tci
         #nx, ny, nz, nxx, nxy, nxz, nyy, nyz, nxyz
         M = tci.M
-        Mx = np.rollaxis(np.rollaxis(M[1:,:,:] - M[:-1,:,:],0,3)/(tci.xvec[1:] - tci.xvec[:-1]),2,0)
-        My = np.rollaxis(np.rollaxis(M[:,1:,:] - M[:,:-1,:],1,3)/(tci.yvec[1:] - tci.yvec[:-1]),2,1)
+        Mx = np.rollaxis(np.rollaxis(M[1:,:,:] - M[:-1,:,:],0,3) / \
+                (tci.xvec[1:] - tci.xvec[:-1]),2,0)
+        My = np.rollaxis(np.rollaxis(M[:,1:,:] - M[:,:-1,:],1,3) / \
+                (tci.yvec[1:] - tci.yvec[:-1]),2,1)
         Mz = (M[:,:,1:] - M[:,:,:-1])/(tci.zvec[1:] - tci.zvec[:-1])
         
     def ne2n(self,ne_tci):
-        '''Analytically turn electron density to refractive index. Assume ne in m^-3'''
+        '''Analytically turn electron density to refractive index. Assume ne 
+        in m^-3'''
         #copy object
         n_tci = ne_tci.copy()
         #inplace change to refractive index
@@ -46,7 +51,8 @@ class Fermat(object):
         if self.straight_line_approx:
             n,nx,ny,nz = 1.,0,0,0
         else:
-            n,nx,ny,nz,nxy,nxz,nyz,nxyz = self.n_tci.interp(x,y,z),0.,0.,0.,0.,0.,0.,0.
+            n,nx,ny,nz,nxy,nxz,nyz,nxyz = self.n_tci.interp(x,y,z), \
+                    0.,0.,0.,0.,0.,0.,0.
         #from ne
         #ne,nex,ney,nez,nexy,nexz,neyz,nexyz = self.ne_tci.interp(x,y,z,doDiff=True)
         #A = - 8.98**2/self.frequency**2
@@ -84,7 +90,8 @@ class Fermat(object):
             n,nx,ny,nz,nxy,nxz,nyz = 1.,0,0,0,0,0,0
         else:
 
-            n,nx,ny,nz,nxy,nxz,nyz,nxyz = self.n_tci.interp(x,y,z),0.,0.,0.,0.,0.,0.,0.
+            n,nx,ny,nz,nxy,nxz,nyz,nxyz = self.n_tci.interp(x,y,z), \
+                    0.,0.,0.,0.,0.,0.,0.
         #TCI only gaurentees C1 and C2 information is lost, second order anyways
         nxx,nyy,nzz = 0.,0.,0.
         #from electron density

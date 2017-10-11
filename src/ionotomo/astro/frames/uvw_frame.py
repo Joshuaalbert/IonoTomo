@@ -232,5 +232,5 @@ def uvw_to_itrs(uvw_coo, itrs_frame):
 def uvw_to_uvw(from_coo, to_frame):
     # for now we just implement this through ITRS to make sure we get everything
     # covered
-    return from_coo.transform_to(ITRS(obstime=from_coo.obstime,location=from_coo.location)).transform_to(to_frame)
+    return from_coo.transform_to(ITRS(obstime=from_coo.obstime)).transform_to(to_frame)
 

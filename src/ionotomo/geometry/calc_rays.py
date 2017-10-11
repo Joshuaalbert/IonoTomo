@@ -6,11 +6,10 @@ from dask import delayed
 import dask.array as da
 
 from ionotomo.inversion.fermat import Fermat
-from ionotomo.inversion.solution import *
 from ionotomo.astro.frames.pointing_frame import Pointing
 from ionotomo.astro.real_data import DataPack
 from ionotomo.geometry.tri_cubic import TriCubic
-
+from ionotomo.inversion.solution import Solution
 import astropy.units as au
 import astropy.coordinates as ac
 import astropy.time as at
@@ -25,8 +24,8 @@ def split_patches(antennas,times, patch_dir, array_center, fixtime, phase):
     '''get origins and directions in shape [Na, Nt, 3]'''
     Na = len(antennas)
     Nt = len(times)
-    origins = np.zeros([Na,Nt,3],dtype=np.double)
-    directions = np.zeros([Na,Nt,3],dtype=np.double)
+    origins = np.zeros([Na,Nt,3],dtype=float)
+    directions = np.zeros([Na,Nt,3],dtype=float)
     j = 0
     while j < Nt:
         time = times[j]
@@ -136,14 +135,14 @@ def calc_rays_dask(antennas,patches,times, array_center, fixtime, phase, ne_tci,
 
 def calc_rays(antennas,patches,times, array_center, fixtime, phase, ne_tci, frequency,  straight_line_approx,tmax, N=None):
     '''Do rays in parallel processes batch by directions'''
-    if isinstance(ne_tci,Solution):
-        ne_tci = ne_tci.tci
     if N is None:
         N = ne_tci.nz
+    #print(antennas,patches,times, array_center, fixtime, phase, ne_tci, frequency,  straight_line_approx,tmax, N)
     Na = len(antennas)
     Nt = len(times)
     Nd = len(patches)
     log.info("Casting rays: {}".format(Na*Nt*Nd))
+
     #rays = np.zeros([Na, Nt, Nd, 4, N], dtype= np.double)
     #split over smaller to make largest workloads
     if Na < Nd:
