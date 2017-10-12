@@ -599,16 +599,16 @@ def generate_example_datapack(Nant = 10, Ntime = 1, Ndir = 10, Nfreqs=4, fov = 4
     return datapack
 
 
-def phase_screen_datapack(N,Nant = 10, Ntime = 1, Nfreqs = 1, fov = 4., alt = 90., az=0., time = None, radio_array=None,datapack=None):
+def phase_screen_datapack(N,ant_idx=-1,time_idx=-1,dir_idx=-1,freq_idx=-1,Nant = 10, Ntime = 1, Nfreqs = 1, fov = 4., alt = 90., az=0., time = None, radio_array=None,datapack=None):
     """Generate an empty datapack with N points in a grid pointing at alt (90 deg) and az (0 deg).
     The number of antennas and times are given by Nant and Ntime.
     field of view (fov) is by default 4 degrees.
     If time is None use current time."""
     if datapack is None:
         datapack = generate_example_datapack(Nant = Nant, Ntime = Ntime, Ndir = 1, Nfreqs=Nfreqs,fov = fov, alt = alt, az=az, time = time, radio_array=radio_array)
-    antennas,antenna_labels = datapack.get_antennas(ant_idx = -1)
-    times,timestamps = datapack.get_times(time_idx=-1)
-    freqs = datapack.get_freqs(freq_idx=-1)
+    antennas,antenna_labels = datapack.get_antennas(ant_idx = ant_idx)
+    times,timestamps = datapack.get_times(time_idx=time_idx)
+    freqs = datapack.get_freqs(freq_idx=freq_idx)
     Na = len(antennas)
     Nt = len(times)
     Nf = len(freqs)
@@ -630,8 +630,11 @@ def phase_screen_datapack(N,Nant = 10, Ntime = 1, Nfreqs = 1, fov = 4., alt = 90
 #    phase = np.random.normal(size=[Na,Nt,len(dirs)])
     phase = np.zeros([Na,Nt,len(dirs),Nf])
     prop = np.zeros([Na,Nt,len(dirs),Nf])
+    clock = np.zeros([Na,Nt])
+    const = np.zeros(Na)
     data_dict = datapack.get_data_dict()
-    data_dict.update({'directions':dirs,'patch_names':patch_names,'phase':phase,'prop':prop})
+    data_dict.update({'antennas':antennas,'antenna_labels':antenna_labels,'times':times,'timestamps':timestamps,
+        'directions':dirs,'patch_names':patch_names,'phase':phase,'prop':prop,'clock':clock,'const':const})
     datapack = DataPack(data_dict=data_dict)
     datapack.set_reference_antenna(antenna_labels[0])
     return datapack

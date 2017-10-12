@@ -40,7 +40,7 @@ def turbulent_perturbation(tci,sigma = 3.,corr = 20., nu = 5./2.):
     B = cov_obj.realization()
     return B
 
-def create_initial_model(datapack,ant_idx = -1, time_idx = -1, dir_idx = -1, zmax = 1000.,spacing=5.,padding=20,thin_f = False):
+def create_initial_model(datapack,ant_idx = -1, time_idx = -1, dir_idx = -1, zmax = 1000.,spacing=5.,padding=20):
     antennas,antenna_labels = datapack.get_antennas(ant_idx = ant_idx)
     patches, patch_names = datapack.get_directions(dir_idx=dir_idx)
     times,timestamps = datapack.get_times(time_idx=time_idx)
@@ -72,7 +72,7 @@ def create_initial_model(datapack,ant_idx = -1, time_idx = -1, dir_idx = -1, zma
 #    ne_model[ne_model<4e7] = 4e7
     return TriCubic(xvec,yvec,zvec,ne_model)
 
-def create_turbulent_model(datapack,corr=20.,seed=None, **initial_model_kwargs):
+def create_turbulent_model(datapack,factor=2.,corr=20.,seed=None, **initial_model_kwargs):
     log.info("Generating turbulent ionospheric model, correlation scale : {}".format(corr))
     if seed is not None:
         np.random.seed(seed)
@@ -80,14 +80,15 @@ def create_turbulent_model(datapack,corr=20.,seed=None, **initial_model_kwargs):
     ne_tci = create_initial_model(datapack,**initial_model_kwargs)
     #exp(-dm) = 0.5 -> dm = -log(1/2)= log(2)
     #exp(dm) = 2 -> dm = log(2)
-    dm = turbulent_perturbation(ne_tci,sigma=np.log(2.),corr=corr,nu=2./3.)
+    dm = turbulent_perturbation(ne_tci,sigma=np.log(factor),corr=corr,nu=2./3.)
     ne_tci.M = ne_tci.M*np.exp(dm)
     n = np.sqrt(1 - 8.98**2 * ne_tci.M/datapack.radio_array.frequency**2)
     log.info("Refractive index stats:\n\
             max(n) : {}\n\
             min(n) : {}\n\
             median(n) : {} \n\
-            mean(n) : {}".format(np.max(n), np.min(n),np.median(n), np.mean(n)))
+            mean(n) : {}\n\
+            std(n) : {}".format(np.max(n), np.min(n),np.median(n), np.mean(n), np.std(n)))
     return ne_tci
 
 def create_initial_solution(datapack,ant_idx = -1, time_idx = -1, dir_idx = -1, zmax = 1000.,spacing=5.,padding=20,thin_f = False):
