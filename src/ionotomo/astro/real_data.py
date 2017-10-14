@@ -59,6 +59,7 @@ class DataPack(object):
         timestamps[...] = self.timestamps
         gps[...] = self.times.gps
         freqs = f.create_dataset("datapack/freqs",(self.Nf,),dtype=np.double)
+        freqs[...] = self.freqs
         phase = f.create_dataset("datapack/phase",(self.Na,self.Nt,self.Nd,self.Nf),dtype=np.double)
         phase[:,:,:,:] = self.phase
         prop = f.create_dataset("datapack/prop",(self.Na,self.Nt,self.Nd,self.Nf),dtype=np.double)

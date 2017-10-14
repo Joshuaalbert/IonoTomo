@@ -123,15 +123,15 @@ def import_data(dd_file, di_file, datapack_file, clobber=False):
     return datapack
 
 if __name__=='__main__':
-#    import_data("../data/NsolutionsDDE_2.5Jy_tecandphasePF_correctedlosoto.hdf5",
-#            "../data/DI.circ.hdf5",
-#            "rvw_datapack.hdf5",
-#            clobber=True)
-    from ionotomo.plotting.plot_tools import plot_datapack, animate_datapack
-    datapack = DataPack(filename="rvw_datapack.hdf5")
-#    animate_datapack(datapack,"rvw_datapack_animation_perdirection", num_threads=1,mode='perdirection')
-#    animate_datapack(datapack,"rvw_datapack_animation_phase", num_threads=1,mode='perantenna',observable='phase')
-    animate_datapack(datapack,"rvw_datapack_animation_prop", num_threads=1,mode='perantenna',observable='prop')
+    import_data("../../data/NsolutionsDDE_2.5Jy_tecandphasePF_correctedlosoto.hdf5",
+            "../../data/DI.circ.hdf5",
+            "rvw_datapack.hdf5",
+            clobber=True)
+#    from ionotomo.plotting.plot_tools import plot_datapack, animate_datapack
+#    datapack = DataPack(filename="rvw_datapack.hdf5")
+##    animate_datapack(datapack,"rvw_datapack_animation_perdirection", num_threads=1,mode='perdirection')
+##    animate_datapack(datapack,"rvw_datapack_animation_phase", num_threads=1,mode='perantenna',observable='phase')
+#    animate_datapack(datapack,"rvw_datapack_animation_prop", num_threads=1,mode='perantenna',observable='prop')
 
 
 
