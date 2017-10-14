@@ -23,8 +23,8 @@ def run(output_folder):
         os.makedirs(datapack_folder)
     except:
         pass
-    datapack_ = DataPack("../rvw_data_analysis/rvw_datapack.hdf5")
-    datapack_screen_ = phase_screen_datapack(10,datapack=datapack)
+    datapack_ = DataPack(filename="../rvw_data_analysis/rvw_datapack.hdf5")
+    datapack_screen_ = phase_screen_datapack(10,datapack=datapack_)
     log.info("Generating a number of ionospheres")
 #    #using lofar configuration generate for a number of random pointings and times
 #    radio_array = generate_example_radio_array(config='lofar')
@@ -34,25 +34,28 @@ def run(output_folder):
     else:
         info = open(info_file,'w')
         info.write("#time_idx timestamp factor corr\n")
-    times,timestamps = datapack.get_times(time_idx=-1)
+    times,timestamps = datapack_.get_times(time_idx=-1)
+    freqs = datapack_.get_freqs(freq_idx=-1)
+    print(freqs)
+    exit()
    
     Nt = len(times)
     for factor in [2.,4.,8.,16.]:
         for corr in [10.,20.,40.,70.]:
-            datapack = datapack.clone()
+            datapack = datapack_.clone()
             datapack_screen = datapack_screen_.clone()
             for j in range(Nt):
                 seed = j+1000
                 log.info("Simulating turbulent ionosphere: factor {} corr {} time {}\n".format(factor,corr,timestamps[j]))
                 ne_tci = create_turbulent_model(datapack,factor=factor,corr=corr,seed=seed,ant_idx = -1, time_idx = [j], dir_idx = -1, zmax = 1000.,spacing=5.,padding=20)
-                datapack = simulate(datapack_screen,ne_tci=ne_tci,num_threads=1,datafolder=None,
+                datapack = simulate_phase(datapack,ne_tci=ne_tci,num_threads=1,datafolder=None,
                      ant_idx=-1,time_idx=[j],dir_idx=-1,freq_idx=-1,do_plot_datapack=False,flag_remaining=False)
-                datapack_screen = simulate_phase(datapack,ne_tci=ne_tci,num_threads=1,datafolder=None,
+                datapack_screen = simulate_phase(datapack_screen,ne_tci=ne_tci,num_threads=1,datafolder=None,
                      ant_idx=-1,time_idx=[j],dir_idx=-1,freq_idx=-1,do_plot_datapack=False,flag_remaining=False)
 
                 info.write("{} {} {} {}\n".format(j, timestamps[j], factor, corr))
             datapack.save(os.path.join(datapack_folder,"datapack_factr{:d}_corr{:d}.hdf5".format(int(factor),int(corr))))
-            datapack_screen.save(os.path.join(datapack_folder,"datapack_factr{:d}_corr{:d}.hdf5".format(int(factor),int(corr))))
+            datapack_screen.save(os.path.join(datapack_folder,"datapack_screen_factr{:d}_corr{:d}.hdf5".format(int(factor),int(corr))))
     info.close()
 
 if __name__=='__main__':
