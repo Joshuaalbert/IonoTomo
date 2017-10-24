@@ -162,7 +162,7 @@ class InversionPipeline(object):
                 dsk["clock_prior_{}_{}".format(thread_num, time_idx)] = clock_prior[:,time_idx:time_idx+1]
                 dsk["const_prior_{}_{}".format(thread_num, time_idx)] = const_prior[:]
                 dsk["ne_prior_{}_{}".format(thread_num, time_idx)] = (partial(create_initial_solution,
-                    ant_idx=-1,time_idx=[time_idx],dir_idx=-1,zmax=self.tmax,spacing=self.spacing,padding=20,thin_f=False),"datapack")
+                    ant_idx=-1,time_idx=[time_idx],dir_idx=-1,zmax=self.tmax,spacing=self.spacing,padding=20),"datapack")
                 dsk["model_prior_{}_{}".format(thread_num, time_idx)] = (lambda ne, clock, const: (ne, clock, const), "ne_prior_{}_{}".format(thread_num, time_idx),
                         "clock_prior_{}_{}".format(thread_num, time_idx),
                         "const_prior_{}_{}".format(thread_num, time_idx))

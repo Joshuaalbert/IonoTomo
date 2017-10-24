@@ -91,8 +91,8 @@ def create_turbulent_model(datapack,factor=2.,corr=20.,seed=None, **initial_mode
             std(n) : {}".format(np.max(n), np.min(n),np.median(n), np.mean(n), np.std(n)))
     return ne_tci
 
-def create_initial_solution(datapack,ant_idx = -1, time_idx = -1, dir_idx = -1, zmax = 1000.,spacing=5.,padding=20,thin_f = False):
-    tci = create_initial_model(datapack,ant_idx = ant_idx, time_idx = time_idx, dir_idx = dir_idx, zmax = zmax,spacing=spacing,padding=padding,thin_f = thin_f)
+def create_initial_solution(datapack,ant_idx = -1, time_idx = -1, dir_idx = -1, zmax = 1000.,spacing=5.,padding=20):
+    tci = create_initial_model(datapack,ant_idx = ant_idx, time_idx = time_idx, dir_idx = dir_idx, zmax = zmax,spacing=spacing,padding=padding)
     antennas,antenna_labels = datapack.get_antennas(ant_idx = ant_idx)
     patches, patch_names = datapack.get_directions(dir_idx=dir_idx)
     times,timestamps = datapack.get_times(time_idx=time_idx)

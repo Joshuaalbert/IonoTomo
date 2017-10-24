@@ -3,7 +3,7 @@ import numpy as np
 import pylab as plt
 
 def test_covariance():
-    c = Covariance(dx=10.,dy=10.,dz=10.)
+    c = Covariance(dx=5.,dy=5.,dz=5.)
     c.create_inverse_stencil()
 #    #c.create_inverse_stencil()
 #    phi = np.zeros([100,100,1000])

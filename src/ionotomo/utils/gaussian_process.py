@@ -5,6 +5,7 @@ from sympy import lambdify, Matrix, symbols, exp, sqrt, Rational, factorial, sin
 from scipy.optimize import fmin_l_bfgs_b
 from scipy.spatial.distance import (pdist,cdist,squareform)
 import sys
+import logging as log
 
 
 class KernelND(object):
@@ -642,9 +643,6 @@ class DotProduct(KernelND):
             I = np.ones_like(x2)
         return [x2,x_1,x_2,I]
 
-
-
-
 def solve_equation(K,y):
     L = np.linalg.cholesky(K)
     alpha = cho_solve((L,True),y)
@@ -654,6 +652,10 @@ def is_singular(A):
     return np.linalg.cond(A) > 1/sys.float_info.epsilon
 
 def level1_solve(x,y,sigma_y,xstar,K):
+    if np.size(sigma_y) == 1:
+        sigma_y = np.ones_like(y)*sigma_y
+    else:
+        assert sigma_y.shape == y.shape
     xconc = np.concatenate([x,xstar],axis=0)
     K_matrix = K(xconc)
     n = x.shape[0]
@@ -661,8 +663,7 @@ def level1_solve(x,y,sigma_y,xstar,K):
     Knn = K_matrix[:n,:n]
     Knm = K_matrix[:n,n:n+m]
     Kmm = K_matrix[n:n+m,n:n+m]
-    K_noise = Diagonal(K.ndims,sigma_y)
-    Kf = Knn + K_noise(x)
+    Kf = Knn + np.diag(sigma_y)
     try:
         L = np.linalg.cholesky(Kf)
         alpha = cho_solve((L,True),y)
@@ -685,11 +686,14 @@ def level1_solve(x,y,sigma_y,xstar,K):
     return fstar,cov,log_mar_like
 
 def neg_log_mar_like_and_derivative(hyperparams,x,y,sigma_y,K):
+    if np.size(sigma_y) == 1:
+        sigma_y = np.ones_like(y)*sigma_y
+    else:
+        assert sigma_y.shape == y.shape
     K.hyperparams = hyperparams
     K_matrix, K_diff = K(x,eval_gradient=True)
     n = x.shape[0]
-    K_noise = Diagonal(K.ndims,sigma_y)
-    Kf = K_matrix + K_noise(x)
+    Kf = K_matrix + np.diag(sigma_y)
     #sing = is_singular(Kf)
     try:#if pos_def and not sing:
         L = np.linalg.cholesky(Kf)
@@ -725,11 +729,14 @@ def neg_log_mar_like_and_derivative(hyperparams,x,y,sigma_y,K):
     return -log_mar_like,-grad
 
 def log_mar_like(hyperparams,x,y,sigma_y,K):
+    if np.size(sigma_y) == 1:
+        sigma_y = np.ones_like(y)*sigma_y
+    else:
+        assert sigma_y.shape == y.shape
     K.hyperparams = hyperparams
     K_matrix = K(x)
     n = x.shape[0]
-    K_noise = Diagonal(K.ndims,sigma_y)
-    Kf = K_matrix + K_noise(x)
+    Kf = K_matrix + np.diag(sigma_y)
     try:
         L = np.linalg.cholesky(Kf)
         alpha = cho_solve((L,True),y)
@@ -777,7 +784,7 @@ def level2_solve(x,y,sigma_y,K,n_random_start=0):
             fmin = res[1]
 
     hyperparams = param_min
-    print("Final log marginal likelihood {}".format(-fmin))
+    log.info("Final log marginal likelihood {}".format(-fmin))
     return hyperparams
 
 def level2_multidataset_solve(x,y,sigma_y,K,n_random_start=0):
@@ -807,7 +814,7 @@ def level2_multidataset_solve(x,y,sigma_y,K,n_random_start=0):
             fmin = res[1]
 
     hyperparams = param_min
-    print("Final log marginal likelihood {}".format(-fmin))
+    log.info("Final log marginal likelihood {}".format(-fmin))
 
     return hyperparams
     

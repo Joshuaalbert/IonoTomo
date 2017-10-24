@@ -112,7 +112,7 @@ def import_data(dd_file, di_file, datapack_file, clobber=False):
     phase = phaseoffset_di + tec_di + clock_di + scalarphase_dd + tec_dd
 
     #fill out some of the values
-    prop = scalarphase_dd + tec_dd #tec_di + tec_dd#radians
+    prop = tec_dd# + scalarphase_dd#tec_di + tec_dd#radians
     clock = f_di['/sol000/clock000/val'][:,:].T#seconds
     const = np.mean(np.mean(np.mean((phaseoffset_di + scalarphase_dd)[:,:,:,:],axis=3),axis=2),axis=1)#radians
     data_dict.update({'phase':phase, 'prop':prop, 'clock':clock, 'const':const})
@@ -120,12 +120,14 @@ def import_data(dd_file, di_file, datapack_file, clobber=False):
     datapack.set_reference_antenna(antenna_labels[0])
 
     datapack.save(datapack_file)
+    f_dd.close()
+    f_di.close()
     return datapack
 
 if __name__=='__main__':
     import_data("../../data/NsolutionsDDE_2.5Jy_tecandphasePF_correctedlosoto.hdf5",
             "../../data/DI.circ.hdf5",
-            "rvw_datapack.hdf5",
+            "rvw_datapack_only_tec_dd.hdf5",
             clobber=True)
 #    from ionotomo.plotting.plot_tools import plot_datapack, animate_datapack
 #    datapack = DataPack(filename="rvw_datapack.hdf5")

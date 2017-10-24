@@ -20,7 +20,7 @@ matplotlib.rcParams['figure.figsize'] = (10,10)
 
 # data intake ~ 28GB
 
-datapack = DataPack(filename="../scripts/rvw_datapack.hdf5")
+datapack = DataPack(filename="../rvw_data_analysis/rvw_datapack.hdf5")
 print("Loaded : {}".format(datapack))
 antennas,antenna_labels = datapack.get_antennas(ant_idx=-1)
 times,timestamps = datapack.get_times(time_idx=-1)
@@ -29,7 +29,7 @@ phase = datapack.get_phase(ant_idx=-1,time_idx=-1,dir_idx=-1,freq_idx=[0])
    
 
 
-# In[3]:
+# In[7]:
 
 
 ## functions
@@ -128,26 +128,27 @@ for ant_id in range(62):
 
 
 
-# In[ ]:
+# In[8]:
 
 
-for ant_id in range(62):
+#for ant_id in range(62):
 
-    print("Using : {}".format(antenna_labels[ant_id]))
-    print(phase.shape)
-    phases = prepare_phase(phase[ant_id,:,0,0])
+ant_id=60
+print("Using : {}".format(antenna_labels[ant_id]))
+print(phase.shape)
+phases = prepare_phase(phase[ant_id,:,0,0])
 
-    K1 = Diagonal(1)
+K1 = Diagonal(1)
 #     K2 = SquaredExponential(1)
 #     K2.set_hyperparams_bounds([50,1000],name='l')
-    K3 = RationalQuadratic(1)
-    K3.set_hyperparams_bounds([50,500],name='l')
+K3 = RationalQuadratic(1)
+K3.set_hyperparams_bounds([50,500],name='l')
 #     K4 = DotProduct(1,c=times[0].gps)
-    K = K1 + K3
+K = K1 + K3
 
-    K = opt_kernel(times[:200:2],phases[:200:2],K,sigma_y=0.03)
-    print(K)
-    plot_prediction(times[200:300],times[:200:2],phases[:200:2], K,sigma_y=0.03,phase_true=phases[200:300],ant_label=antenna_labels[ant_id])
+K = opt_kernel(times[:200:2],phases[:200:2],K,sigma_y=0.03)
+print(K)
+plot_prediction(times[200:300],times[:200:2],phases[:200:2], K,sigma_y=0.03,phase_true=phases[200:300],ant_label=antenna_labels[ant_id])
 
 
 # In[ ]:

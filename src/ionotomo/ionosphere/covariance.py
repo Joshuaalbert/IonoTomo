@@ -64,6 +64,39 @@ class Covariance(object):
 
     def create_inverse_stencil(self):
         m = self.c_stencil.shape[0]
+        from keras.models import Model
+        from keras.layers import Input, Conv3D
+        from keras.optimizers import Adam
+        delta = np.zeros([m,m,m])
+        delta[m>>1,m>>1,m>>1] = 1.
+        #add channel and batch_num
+        delta = np.expand_dims(np.expand_dims(delta,0),0)
+        #delta *= 0
+        #delta += 1
+
+        data = np.random.normal(size=[10,1,m,m,m])
+
+        inputs = Input(shape=delta.shape[1:])
+        conv_ = Conv3D(1,self.c_stencil.shape,
+                data_format='channels_first',
+                padding='same',use_bias=False,
+                trainable=False,
+                weights=[np.expand_dims(np.expand_dims(self.c_stencil,-1),-1)])
+        conv_inv_ = Conv3D(1,self.c_stencil.shape,
+                data_format='channels_first',
+                padding='same',use_bias=False,trainable=True)
+        o1 = conv_(conv_inv_(conv_(conv_inv_(inputs))))
+        o2 = conv_inv_(conv_(conv_inv_(conv_(inputs))))
+        model = Model(inputs=inputs,outputs=[o1,o2])
+        model.compile(optimizer=Adam(lr=1e-3),loss=['mse']*2)
+        conv_.set_weights([np.expand_dims(np.expand_dims(self.c_stencil,-1),-1)])
+        model.fit(delta,[delta,delta],batch_size=1,epochs=10000,verbose=1)
+        #print(model.layers[1].get_weights()[0][:,:,:,0,0])
+        print(model.predict(delta)[0][0,0,m>>1,m>>1,m>>1])
+
+
+    def create_inverse_stencil_(self):
+        m = self.c_stencil.shape[0]
         K = 5
         from sympy import symbols, Array,Matrix
         p = K >> 1
@@ -92,6 +125,7 @@ class Covariance(object):
                                 M[xi][yi][zi] = M[p-x][p-y][p-z]
         M = Array(M)
         #print(M)
+        self.inverse_stencil = S0
         u = []
         for e in M:
             if e not in u:

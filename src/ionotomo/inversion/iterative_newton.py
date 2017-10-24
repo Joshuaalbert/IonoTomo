@@ -9,6 +9,7 @@ import dask.array as da
 import os
 
 from ionotomo.plotting.plot_tools import plot_datapack
+from ionotomo.utils.cho_solver import cho_back_substitution
 import logging as log
 TECU = 1e13 #TEC unit / km
 speedoflight = 299792458. #m/s
@@ -69,6 +70,18 @@ def solve_sym_posdef(A,b):
         x = np.linalg.pinv(A).dot(b)
     return x
 
+def cholesky_inner(A,b):
+    """calculate b.A^_1.b using cholesky or else pinv"""
+    try:
+        L = np.linalg.cholesky(A)
+        x = cho_back_substitution(L,b,True,False)
+        return x.T.dot(x)
+    except:
+        log.debug("Matrix not pos-def, using pinv")
+        inv = np.linalg.pinv(A)
+        return np.linalg.multi_dot([b.T,inv,b])
+
+
 
 def forward_equation(model, tci, rays, freqs, K=1e11, i0 = 0):
     '''Calculates the phase from the given model point.
@@ -122,8 +135,8 @@ def data_residuals(dobs,g):
     '''
     return dobs - g
 
-def prior_penalty(model, model_prior, tci, rays, freqs, K=1e11, i0 = 0):
-    '''Calculates the regularisation penalty imposed by prior
+def prior_penalty_mu(model, model_prior, tci, rays, freqs, K=1e11, i0 = 0):
+    '''Calculates the regularisation penalty imposed by prior in mu
     model : tuple (mu, clock, const)
         mu is flattened model, clock is shape (Na, Nt), const is shape (Na,)
         Note: const is unused here.
@@ -151,14 +164,13 @@ def prior_penalty(model, model_prior, tci, rays, freqs, K=1e11, i0 = 0):
     r = np.zeros([Na,Nt,Nd,Nf],dtype=float)
     ne_rays = tci.interp(rays[:,:,:,0,:],rays[:,:,:,1,:],rays[:,:,:,2,:])
     #dm
-    dclock = clock_prior - clock
     tci.M = mu_prior - mu
     dmu_rays = tci.interp(rays[:,:,:,0,:],rays[:,:,:,1,:],rays[:,:,:,2,:])
     for l in range(Nf):
         n_p = 1.2404e-2*freqs[l]**2
         a_ = 2*np.pi * freqs[l]
         b_ = a_ / (2 * n_p * speedoflight)
-        dr = a_ * np.einsum("ij,k->ijk",dclock,np.ones(Nd))
+        #dr = a_ * np.einsum("ij,k->ijk",dclock,np.ones(Nd))
         n_rays = ne_rays/(-n_p)
         n_rays += 1
         np.sqrt(n_rays,out=n_rays)
@@ -167,8 +179,8 @@ def prior_penalty(model, model_prior, tci, rays, freqs, K=1e11, i0 = 0):
         ion =  simps(integrand,rays[:,:,:,3,:],axis=3)
         ion -= ion[i0,...]
         ion *= b_
-        dr -= ion
-        r[:,:,:,l] += dr
+        #dr -= ion
+        r[:,:,:,l] -= ion
     return r
 
 def signal(dd, prior_penalty):
@@ -265,10 +277,8 @@ def signal_covariance(model, covariance, tci, rays, freqs, CdCt, num_threads, K=
 
 
     #the distance between all pairs within kernel_size
-    dist = np.array([rays[i1,j1,k1,0,s1] - rays[i2,j2,k2,0,s2],
-        rays[i1,j1,k1,1,s1] - rays[i2,j2,k2,1,s2],
-        rays[i1,j1,k1,2,s1] - rays[i2,j2,k2,2,s2]]).T
-
+    dist = rays[i1,j1,k1,0:3,s1] - rays[i2,j2,k2,0:3,s2]
+    print("test")
     C_mu = c_mu(dist,np.zeros([1,3]))[:,0]#len(pairs) x 1 -> len(pairs)
     C_mu *= dsds
 
@@ -294,7 +304,7 @@ def signal_covariance(model, covariance, tci, rays, freqs, CdCt, num_threads, K=
     mask_00 = mask_10*mask_02
     
     #S = np.diag(CdCt.flatten())
-    def inner_loop(i1,j1,k1,s1,i2,j2,k2,s2,l,lp,freqs,speedoflight,d_,ne_rays2,Na,Nt,Nd,Nf,Ns,i0,mask_02,mask_10,mask_0d0):
+    def inner_loop(i1,j1,k1,s1,i2,j2,k2,s2,l,lp,freqs,speedoflight,d_,ne_rays2,Na,Nt,Nd,Nf,Ns,i0,mask_02,mask_10,mask_00):
         #S = np.zeros([Na,Nt,Nd,Nf,Na,Nt,Nd,Nf],dtype=float)
         S = np.zeros([Na*Nt*Nd*Nf,Na*Nt*Nd*Nf],dtype=float)
         a_2 = (2*np.pi * freqs[lp])
@@ -417,8 +427,6 @@ def update_direction(snr, dd,  m_n, covariance, tci, rays, freqs, CdCt, num_thre
 
     mu,clock,const = m_n
     c_mu, c_clock = covariance
-
-    
 
     ne = np.exp(mu)
     ne *= K
@@ -545,6 +553,183 @@ def linesearch(dd,g,phi,m_n, covariance, tci, rays, freqs, CdCt, num_threads,K=1
 
     return ep_0
 
+def calc_I_11(model, covariance, tci, rays, freqs, num_threads, K=1e11, i0 = 0):
+    '''Calculates the phase from the given model point.
+    model : tuple (mu, clock, const)
+        mu is flattened model, clock is shape (Na, Nt), const is shape (Na,)
+    covariance : tuple (Covariance, float)
+        the Covariance object for mu, and float variance for clock
+    tci : TriCubic
+        interpolator for the region
+    rays : array
+        array of shape (Na, Nt, Nd, 4, Ns), the third dimension is x,y,z,s in that order
+    freqs : array of shape (Nf,)
+        the frequencies
+    num_threads: int or None
+        the number of threads allowed for calculating I_11, None is all.
+    K : float (optional)
+        the log-transform constant, default 1e11
+    i0 : int (optional)
+        the reference antenna index, default 0
+    '''
+    Na,Nt,Nd,_,Ns = rays.shape
+    Nf = freqs.shape[0]
+    def index(i,j,k,s, N2 = Nt, N3 = Nd, N4 = Ns):
+        '''Get the C-order flattened index'''
+        return np.ndarray.astype(s + N4*(k + N3*(j + N2*i)), int)
+
+    def index_inv(h, N2 = Nt, N3 = Nd, N4 = Ns):
+        '''Invert flattened index to the indices'''
+        h = np.ndarray.astype(h,float)
+        s = np.mod(h, float(N4))
+        h -= s
+        h /= float(N4)
+        k = np.mod(h, float(N3))
+        h -= k
+        h /= float(N3)
+        j = np.mod(h, float(N2))
+        h -= j
+        h /= float(N2)
+        i = h
+        return np.ndarray.astype(i,int), np.ndarray.astype(j,int), np.ndarray.astype(k,int), np.ndarray.astype(s,int)
+
+    c_mu,c_clock = covariance
+    mu,clock,const = model
+
+    #kernel_size should be large enough that covariance is basically zero for greater distances
+    kernel_size = 0.
+    
+    for d in [[0,0,1],[0,1,0],[1,0,0]]:
+        c0_ = c_mu(np.zeros([1,3]),np.array([d])*0)[0,0]
+        c_ = c_mu(np.zeros([1,3]),np.array([d])*kernel_size)[0,0]
+        while c_/c0_ > 0.1:
+            kernel_size += 0.5
+            c_ = c_mu(np.zeros([1,3]),np.array([d])*kernel_size)[0,0]
+    #kernel_size=10.
+    log.info("Kernel_size is : {} km".format(kernel_size))
+    
+    #Use kd-tree to only calculate points within a kernel_size distance
+    
+    kdt = cKDTree(np.array([rays[:,:,:,0,:].flatten(),
+        rays[:,:,:,1,:].flatten(),
+        rays[:,:,:,2,:].flatten()]).T)
+    pairs = kdt.query_pairs(r=kernel_size,eps=0.,output_type='ndarray')
+    i1,j1,k1,s1 = index_inv(pairs[:,0])
+    i2,j2,k2,s2 = index_inv(pairs[:,1])
+    
+#    i1,j1,k1,s1 = np.unravel_index(pairs[:,0],[Na,Nt,Nd,Ns])
+#    i2,j2,k2,s2 = np.unravel_index(pairs[:,1],[Na,Nt,Nd,Ns])
+    
+
+    log.info("Number of pairs within kernel_size : {}".format(pairs.shape[0]))
+
+    #ds at each point
+    ds1 = rays[i1,j1,k1,3,s1]
+    ds1 -= rays[i1,j1,k1,3,s1-1]
+    mask = s1 == 0
+    ds1[mask] = np.mean(ds1[s1 > 0]) 
+
+    ds2 = rays[i2,j2,k2,3,s2]
+    ds2 -= rays[i2,j2,k2,3,s2-1]
+    mask = s2 == 0
+    ds2[mask] = np.mean(ds2[s2 > 0])
+    
+    dsds = ds1*ds2
+
+
+    #the distance between all pairs within kernel_size
+    dist = rays[i1,j1,k1,0:3,s1] - rays[i2,j2,k2,0:3,s2]
+
+    C_mu = c_mu(dist,np.zeros([1,3]))[:,0]#len(pairs) x 1 -> len(pairs)
+    C_mu *= dsds
+
+#    dist *= dist
+#    dist = np.sum(dist,axis=3)
+#    np.sqrt(dist,out=dist)
+
+    #ne along path
+    ne = np.exp(mu)
+    ne *= K
+    tci.M = ne
+    ne_rays = tci.interp(rays[:,:,:,0,:],rays[:,:,:,1,:],rays[:,:,:,2,:])
+    ne_rays1 = ne_rays[i1,j1,k1,s1]
+    ne_rays2 = ne_rays[i2,j2,k2,s2]
+#    ne_rays1 = tci.interp(rays[i1,j1,k1,0,s1],rays[i1,j1,k1,1,s1],rays[i1,j1,k1,2,s1])
+#    ne_rays2 = tci.interp(rays[i2,j2,k2,1,s2],rays[i2,j2,k2,1,s2],rays[i2,j2,k2,2,s2])
+
+    #result only store half then rearrange later
+    I11 = np.zeros([Na*Nt*Nd*Nf,Na*Nt*Nd*Nf],dtype=float)
+
+    mask_02 = i1 == i0
+    mask_10 = i2 == i0
+    mask_00 = mask_10*mask_02
+    
+    #S = np.diag(CdCt.flatten())
+    def inner_loop(i1,j1,k1,s1,i2,j2,k2,s2,l,lp,freqs,speedoflight,d_,ne_rays2,Na,Nt,Nd,Nf,Ns,i0,mask_02,mask_10,mask_00):
+        #S = np.zeros([Na,Nt,Nd,Nf,Na,Nt,Nd,Nf],dtype=float)
+        I11 = np.zeros([Na*Nt*Nd*Nf,Na*Nt*Nd*Nf],dtype=float)
+        a_2 = (2*np.pi * freqs[lp])
+        n_p2 = 1.2404e-2*freqs[lp]**2
+        b_2 = a_2/(2*n_p2*speedoflight)
+
+        n_rays2 = ne_rays2/(-n_p2)
+        n_rays2 += 1.
+        np.sqrt(n_rays2,out=n_rays2)
+        dmu_n2 = ne_rays2/n_rays2
+
+        #dmu1 cm dmu2 dsds
+
+#            S[:,:,:,l,:,:,:,lp] += a_1 * a_2 / c_clock
+        f1 = np.ones(len(i1),dtype=int)*l
+        f2 = np.ones(len(i2),dtype=int)*lp
+    
+        q = d_*dmu_n2     
+        q[mask_02] -= d_[mask_02]*dmu_n2[mask_02]
+        q[mask_10] -= d_[mask_10]*dmu_n2[mask_10]
+        q[mask_00] += d_[mask_00]*dmu_n2[mask_00]
+        q *= b_1*b_2
+
+        h1h2 = np.ravel_multi_index((i1,j1,k1,f1,i2,j2,k2,f2),[Na,Nt,Nd,Nf,Na,Nt,Nd,Nf])
+        h2h1 = np.ravel_multi_index((i2,j2,k2,f2,i1,j1,k1,f1),[Na,Nt,Nd,Nf,Na,Nt,Nd,Nf])
+
+        I11 += np.bincount(h1h2, q, minlength=I11.size).reshape(I11.shape)
+        I11 += np.bincount(h2h1, q, minlength=I11.size).reshape(I11.shape)
+
+        return I11
+#    client = Client()
+    from dask.threaded import get
+    #pair wise component i<j means need to do twice for swapped frequencies
+    dsk = {}
+    
+    I11_sum = []
+    for l in range(Nf):
+        a_1 = (2*np.pi * freqs[l])
+        n_p1 = 1.2404e-2*freqs[l]**2
+        b_1 = a_1/(2*n_p1*speedoflight)
+        
+        #Na Nt Nd Ns at l
+        n_rays1 = ne_rays1/(-n_p1)
+        n_rays1 += 1.
+        np.sqrt(n_rays1,out=n_rays1)
+        dmu_n1 = ne_rays1/n_rays1
+
+        d_ = dmu_n1 * C_mu
+        dsk['d_{}'.format(l)] = d_
+        
+        for lp in range(Nf):
+            dsk['I11_{}_{}'.format(l,lp)] = (inner_loop,i1,j1,k1,s1,i2,j2,k2,s2,l,lp,freqs,speedoflight,'d_{}'.format(l),ne_rays2,Na,Nt,Nd,Nf,Ns,i0,mask_02,mask_10,mask_00)
+            I11_sum.append('I11_{}_{}'.format(l,lp))
+    def merge(*I11):
+        res = I11[0]
+        for i in range(1,len(I11)):
+            res += I11[i]
+        return res
+    dsk['I11'] = (merge ,*I11_sum)
+    from dask.threaded import get
+    I11 = get(dsk,'I11',num_workers=num_threads)
+
+    return I11
+
 
 
 #@profile
@@ -588,18 +773,152 @@ def iterative_newton_step(m_n,m_prior,rays,tci,covariance,CdCt, dobs, freqs,num_
     print("Rays shape : {}".format(rays.shape))
     _,_,_,Nf = dobs.shape
 
+    Nray = Na*Nt*Nd*Nf
+
     mu_n,clock_n,const_n = m_n
     mu_prior,clock_prior,const_prior = m_prior
+
+    c_mu,c_clock = covariance
+    c_const = 0.1
+
+    G_const = 1.
+    G_clock = 2.*np.pi * freqs
+
+    ###
+    # dd
+    ###
 
     print("dd = d_obs - g(m_n)")
     g_phase = forward_equation(m_n, tci, rays, freqs, K=K, i0 = i0)
     dd = dobs - g_phase
 
-    print("r_n = G(m_p-m_n)")
-    r = prior_penalty(m_n, m_prior, tci, rays, freqs, K=K, i0 = i0)
+    ###
+    # Cd^-1 dd (assume invertible, non zero uncertainty)
+    ###
 
-    print("signal = dd-r")
-    signal = dd - r
+    # Na Nt Nd Nf
+    wdd = dd/CdCt
+
+    ###
+    # k2
+    ###
+
+    # Na Nt
+    k2_clock = np.einsum("m,n,l,ijkl->mn",np.ones(Na),np.ones(Nt),G_clock,wdd,optimize=True)
+    k2_clock += (clock_prior - clock_n)/c_clock
+
+    # Na
+    k2_const = np.einsum("m,ijkl->m",np.ones(Na),wdd,optimize=True)
+    k2_const += (const_prior - const_n)/c_const
+
+    ###
+    # r_mu = - G_mu dm_mu
+    ###
+
+    print("r_mu_n = G_mu(mu_p-mu_n)")
+    r_mu = prior_penalty_mu(m_n, m_prior, tci, rays, freqs, K=K, i0 = i0)
+
+    ###
+    # signal_mu
+    ###
+
+    print("signal_mu = dd-r_mu")
+    signal_mu = dd - r_mu
+    
+    ###
+    # I_11 = G_mu C_mu G_mu^t
+    ###
+    
+    I_11 = calc_I_11(m_n, covariance, tci, rays, freqs, num_threads, K=K, i0 = i0).reshape([Nray,Nray])
+
+    ###
+    # C_d + I_11
+    ###
+    print("S_11 = C_d + I_11")
+
+    S_11 = np.diag(CdCt.flatten()) + I_11
+
+    ###
+    # V_11 = I_11 * (Cd + I_11)^-1
+    ###
+    print("V_11 =I_11 * (Cd + I_11)^-1")
+
+    V_11 = solve_sym_posdef(S_11,I_11).T   
+
+    ###
+    # VAU = G_2^t * (C_d + I_11)^-1 G_2
+    ###
+    print("VAU = G_2^t * (C_d + I_11)^-1 G_2")
+
+    # Nrays, Na*Nt
+    G_clock_ = np.einsum("m,n,l,i,j,k->ijklmn",np.ones(Na),np.ones(Nt),G_clock, np.ones(Na),np.ones(Nt), np.ones(Nd), optimize=True).reshape([Na*Nt*Nd*Nf,Na*Nt])
+    # Nrays, Na
+    G_const_ = np.einsum("m,l,i,j,k->ijklm",np.ones(Na),np.ones(Nf), np.ones(Na),np.ones(Nt), np.ones(Nd), optimize=True).reshape([Na*Nt*Nd*Nf,Na])
+    VAU_11 = cholesky_inner(S_11,G_clock_)
+    VAU_22 = cholesky_inner(S_11,G_const_)
+    VAU_12 = G_clock_.T.dot(solve_sym_posdef(S_11,G_const_))
+    VAU_21 = VAU_12.T
+
+    ###
+    # CVAU = C^-1 - VA^-1U
+    ###
+    print('CVAU = C^-1 - VA^-1U')
+
+    CVAU = np.zeros([Na*Nt + Na,Na*Nt+Na])
+    
+    CVAU[:Na*Nt,:Na*Nt] = VAU_11 +  np.eye(Na*Nt)/c_clock
+    CVAU[:Na*Nt,Na*Nt:] = VAU_12
+    CVAU[Na*Nt:,:Na*Nt] = VAU_21
+    CVAU[:Na*Nt,:Na*Nt] = VAU_22 +  np.eye(Na*Nt)/c_const#no const prior
+
+    ###
+    # R_2 = -(G_2^t Cd^-1 V_11 r_mu + k_2)
+    ###
+    print("R_2 = -(G_2^t Cd^-1 V_11 r_mu + k_2)")
+    R_2_clock  = np.einsum("m,n,l,i,j,k,ijkl,ijklqwer,qwer->mn",
+            np.ones(Na), np.ones(Nt),G_clock,np.ones(Na),np.ones(Nt),
+            np.ones(Nd),1./CdCt,V_11.reshape([Na,Nt,Nd,Nf,Na,Nt,Nd,Nf]), r_mu,optimize=True)
+    R_2_clock += k2_clock
+    R_2_clock *= -1.
+
+    R_2_const  = np.einsum("m,l,i,j,k,ijkl,ijklqwer,qwer->m",
+            np.ones(Na), np.ones(Nf),np.ones(Na),np.ones(Nt),
+            np.ones(Nd),1./CdCt,V_11.reshape([Na,Nt,Nd,Nf,Na,Nt,Nd,Nf]), r_mu,optimize=True)
+    R_2_const += k2_const
+    R_2_const *= -1.
+    R_2 = np.concatenate([R_2_clock.flatten(),R_2_const.flatten()])
+
+    ###
+    # dm2 = CVAU^-1 R_2
+    ###
+    print("dm2 = CVAU^-1 R_2")
+    
+    dm2 = solve_sym_posdef(CVAU,R_2)
+    print(dm2)
+
+    ###
+    # R_1 = r_mu - G2 dm2
+    ###
+
+    G2 = np.concatenate([np.einsum("m,n,l,i,j,k->mnijkl",
+            np.ones(Na), np.ones(Nt),G_clock, np.ones(Na), np.ones(Nt),
+            np.ones(Nd),optimize=True).reshape([Na*Nt,Na*Nt*Nd*Nf]), 
+            np.einsum("m,l,i,j,k->mijkl",
+            np.ones(Na), np.ones(Nf), np.ones(Na), np.ones(Nt),
+            np.ones(Nd),optimize=True).reshape([Na,Na*Nt*Nd*Nf])])
+
+    R_1 = -np.einsum("mr,m->r",G2,dm2)
+    R_1 += r_mu.flatten()
+    
+    print(R_1)
+    
+
+
+
+    
+
+
+
 
     print("S = Cd + GCmG^t")
 
