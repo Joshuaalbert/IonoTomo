@@ -3,7 +3,7 @@ ionospheres. We wish to take to be able to take into account turbulent
 structure"""
 import numpy as np
 from scipy.special import gamma
-from ionotomo.utils.gaussian_process import *
+
 
 class IonosphereSimulation(object):
     """Simulate a realisation with a Matern kernel and Chapmen layers.
