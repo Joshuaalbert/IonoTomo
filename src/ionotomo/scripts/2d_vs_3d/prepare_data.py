@@ -1,6 +1,7 @@
 from ionotomo import *
 import h5py
 import numpy as np
+import astropy.units as au
 
 if __name__=="__main__":
     datapack = DataPack(filename="../rvw_data_analysis/rvw_datapack.hdf5")
@@ -14,6 +15,7 @@ if __name__=="__main__":
     Nt = len(times)
     Nd = len(directions)
     Nf = len(freqs)
+    print(Na*Nt*Nd*Nf*8*8/1024/1024)
 
     output = h5py.File("datapack_vanWeeren_partial_v1.hdf5",'w')
     output['/data/rays_uvw'] = np.zeros((Na,Nt,Nd,Nf,8),dtype=float)
@@ -36,13 +38,14 @@ if __name__=="__main__":
         uvw = Pointing(location=center, phase= phase_center, fixtime=fixtime, obstime=t)
         ants_uvw = antennas.transform_to(uvw)
         dirs_uvw = directions.transform_to(uvw)
-        output['/data/rays_uvw'][:,i:i+1,:,:,:] = np.stack(np.meshgrid(ants_uvw.u, 
-            ants_uvw.v, 
-            ants_uvw.w, 
-            times[i:i+1], 
-            dirs_uvw.u,
-            dirs_uvw.v,
-            dirs_uvw.w, 
+
+        output['/data/rays_uvw'][:,i:i+1,:,:,:] = np.stack(np.meshgrid(ants_uvw.u.to(au.km).value, 
+            ants_uvw.v.to(au.km).value, 
+            ants_uvw.w.to(au.km).value, 
+            times[i:i+1].gps, 
+            dirs_uvw.u.value,
+            dirs_uvw.v.value,
+            dirs_uvw.w.value, 
             freqs,
-            indexing='ij'),axis=-1)
+            indexing='ij',copy=False),axis=-1)
     output.close()
