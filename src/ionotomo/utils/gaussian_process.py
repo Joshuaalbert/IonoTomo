@@ -672,6 +672,7 @@ def level1_solve(x,y,sigma_y,xstar,K):
         cov = Kmm - V.T.dot(V)
         log_mar_like = -y.dot(alpha)/2. - np.sum(np.log(np.diag(L))) - n/2.*np.log(2.*np.pi)
     except:
+        print('svd')
         u,s,v = np.linalg.svd(Kf)
         sinv = 1./s
         sinv[s < 1e-14] == 0.
@@ -706,6 +707,7 @@ def neg_log_mar_like_and_derivative(hyperparams,x,y,sigma_y,K):
             KK = cho_solve((L,True),K_diff[i,:,:])
             grad[i] = (np.trace(aaK) - np.trace(KK))/2.
     except:#else:
+        print('svd')
         u,s,v = np.linalg.svd(Kf)
         sinv = 1./s
         sinv[s < 1e-14] == 0.
@@ -742,6 +744,7 @@ def log_mar_like(hyperparams,x,y,sigma_y,K):
         alpha = cho_solve((L,True),y)
         log_mar_like = -y.dot(alpha)/2. - np.sum(np.log(np.diag(L))) - n/2.*np.log(2.*np.pi)
     except:
+        print('svd')
         u,s,v = np.linalg.svd(Kf)
         sinv = 1./s
         sinv[s < 1e-14] == 0.
@@ -819,12 +822,12 @@ def level2_multidataset_solve(x,y,sigma_y,K,n_random_start=0):
     return hyperparams
     
 def example_level2_solve():
+    X = np.random.uniform(size=2*10*3).reshape([2,10,3])
+    y = np.arange(2*10,dtype=float).reshape([2,10])
+    sigma_y = 2*np.ones(2*10,dtype=float).reshape([2,10])
+
     np.random.seed(1234)
     K1 = SquaredExponential(2,l=0.29,sigma=3.7)
-    #K1.fixed = 'l'
-    #K1.fixed = 'sigma'
-    K2 = Diagonal(2,sigma=1e-5)
-    K2.fixed = 'sigma'
     K3 = RationalQuadratic(2,sigma=1.)
     K4 = MaternPIso(2,p=2)
     K6 = GammaExponential(2)
@@ -833,7 +836,7 @@ def example_level2_solve():
     K8 = PeriodicSep(2,1,l=0.5)
     K8.fixed='l'
     K9 = DotProduct(2)
-    K = K3 *K1*K9+K2
+    K = K1
     hp = K.hyperparams 
     x = np.random.uniform(size=[250,2])
     xstar = np.linspace(-1,2,100)

@@ -15,21 +15,30 @@ def fit_2d_cubic(x,y,xstar):
     ystar = griddata(x, y, (xstar[:,0],xstar[:,1]), method='cubic')
     return ystar
 
-def fit_datapack(datapack,template_datapack,ant_idx = -1, time_idx=-1, dir_idx=-1):
+def fit_datapack(datapack,template_datapack,ant_idx = -1, time_idx=-1, dir_idx=-1, freq_idx=-1):
+    """Fit a datapack to a template datapack using Bayesian optimization
+    of given kernel. Conjugation occurs at 350km."""
+
     antennas,antenna_labels = datapack.get_antennas(ant_idx)
     directions, patch_names = datapack.get_directions(dir_idx)
     times,timestamps = datapack.get_times(time_idx)
-    dtec = np.stack([np.mean(datapack.get_dtec(ant_idx = ant_idx,dir_idx=dir_idx,time_idx=time_idx),axis=1)],axis=1)
+    freqs = datapack.get_freqs(freq_idx)
+    phase = datapack.get_phase(ant_idx = ant_idx,dir_idx=dir_idx,time_idx=time_idx,freq_idx=-1)
     Na = len(antennas)
     Nt = len(times)
     Nd = len(directions) 
-    template_datapack.set_reference_antenna(datapack.ref_ant)
+    Nf = len(freqs)
+
+    template_datapack = template_datapack.clone()
     antennas_,antenna_labels_ = template_datapack.get_antennas(ant_idx)
     directions_, patch_names_ = template_datapack.get_directions(dir_idx)
     times_,timestamps_ = template_datapack.get_times(time_idx)
+    freqs_ = template_datapack.get_freqs(freq_idx)
     Na_ = len(antennas_)
     Nt_ = len(times_)
     Nd_ = len(directions_)
+    Nf_ = len(freqs_)
+
     ref_ant_idx = template_datapack.get_antenna_idx(datapack.ref_ant)
     fit_dtec = np.zeros([Na_,Nt_,Nd_])#np.stack([np.mean(datapack.get_dtec(ant_idx = ant_idx,dir_idx=dir_idx,time_idx=time_idx),axis=1)],axis=1)
 
