@@ -2,6 +2,7 @@ from ionotomo import *
 import h5py
 import numpy as np
 import astropy.units as au
+from rathings.phase_unwrap import phase_unwrapp1d
 
 def plot(filename):
     output = h5py.File(filename,'r')
@@ -30,15 +31,20 @@ if __name__=="__main__":
     datapack = DataPack(filename="../rvw_data_analysis/rvw_datapack.hdf5")
     
     antennas,antenna_labels = datapack.get_antennas(ant_idx=-1)
-    times,timestamps = datapack.get_times(time_idx=-1)
+    times,timestamps = datapack.get_times(time_idx=range(400))
     directions,patch_names = datapack.get_directions(dir_idx=-1)
     freqs = datapack.get_freqs(freq_idx=-1)
-    phase = datapack.get_phase(ant_idx=-1,time_idx=-1,dir_idx=-1,freq_idx=-1)
+    phase = datapack.get_phase(ant_idx=-1,time_idx=range(400),dir_idx=-1,freq_idx=-1)
 
     Na = len(antennas)
     Nt = len(times)
     Nd = len(directions)
     Nf = len(freqs)
+    for i in range(Na):
+        for k in range(Nd):
+            for l in range(Nf):
+                phase[i,:,k,l] = phase_unwrapp1d(phase[i,:,k,l])
+
     print(Na*Nt*Nd*Nf*8*8/1024/1024)
 
     output = h5py.File("datapack_vanWeeren_partial_v1.hdf5",'w')
