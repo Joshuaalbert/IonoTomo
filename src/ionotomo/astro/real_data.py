@@ -34,7 +34,7 @@ class DataPack(object):
     def get_data_dict(self):
         return {'radio_array':self.radio_array, 'antennas':self.antennas, 'antenna_labels':self.antenna_labels,
                         'times':self.times, 'timestamps':self.timestamps, 'directions':self.directions,
-                        'patch_names' : self.patch_names, 'freqs':self.freqs,'phase':self.phase,'ref_ant':self.ref_ant, 'const':self.const, 'clock':self.clock, 'prop':self.prop}
+                        'patch_names' : self.patch_names, 'freqs':self.freqs,'phase':self.phase,'ref_ant':self.ref_ant, 'const':self.const, 'clock':self.clock, 'prop':self.prop, 'variance': self.variance}
 
     def clone(self):
         datapack = DataPack(self.get_data_dict())
@@ -64,6 +64,8 @@ class DataPack(object):
         phase[:,:,:,:] = self.phase
         prop = f.create_dataset("datapack/prop",(self.Na,self.Nt,self.Nd,self.Nf),dtype=np.double)
         prop[:,:,:,:] = self.prop
+        variance = f.create_dataset("datapack/variance",(self.Na,self.Nt,self.Nd,self.Nf),dtype=np.double)
+        variance[:,:,:,:] = self.variance
 
         clock = f.create_dataset("datapack/clock",(self.Na,self.Nt),dtype=np.double)
         clock[:,:] = self.clock
@@ -91,6 +93,10 @@ class DataPack(object):
         self.freqs = f["datapack/freqs"][:]
         self.phase = f["datapack/phase"][:,:,:,:]
         self.prop = f["datapack/prop"][:,:,:,:]
+        try:
+            self.variance = f["datapack/variance"][:,:,:,:]
+        except:
+            self.variance = np.zeros_like(self.phase)
         self.clock = f["datapack/clock"][:,:]
         self.const = f["datapack/const"][:]
         self.ref_ant = np.array(f["datapack/phase"].attrs['ref_ant']).astype(str).item(0)
@@ -115,7 +121,8 @@ class DataPack(object):
                 'const' : (np.array,"Constant phase offset param"),
                 'clock' : (np.array,"Clock term"),
                 'prop' : (np.array,"Propagation term"),
-                'ref_ant' : (str,"The reference antenna label")}
+                'ref_ant' : (str,"The reference antenna label"),
+                'variance' : (np.array,"The variance of measurements"}
         return params
 
     def help(self):
@@ -147,6 +154,7 @@ class DataPack(object):
         assert self.const.shape == (self.Na,)
         assert self.clock.shape == (self.Na,self.Nt)
         assert self.prop.shape == (self.Na,self.Nt,self.Nd,self.Nf)
+        assert self.variance.shape = (self.Na,self.Nt,self.Nd,self.Nf)
         self.antenna_labels = np.array(self.antenna_labels)
         self.patch_names = np.array(self.patch_names)
         self.timestamps = np.array(self.timestamps)
@@ -306,6 +314,53 @@ class DataPack(object):
 #            i += 1
         return output
 
+    def set_variance(self,variance,ant_idx=[],time_idx=[], dir_idx=[],freq_idx = -1, ref_ant=None):
+        '''Set the specified variance solutions corresponding to the requested indices.
+        value of -1 means all.'''
+        if ant_idx is -1:
+            ant_idx = np.arange(self.Na)
+        if time_idx is -1:
+            time_idx = np.arange(self.Nt)
+        if dir_idx is -1:
+            dir_idx = np.arange(self.Nd)
+        if freq_idx is -1:
+            freq_idx = np.arange(self.Nf)
+        ant_idx = np.sort(ant_idx)
+        time_idx = np.sort(time_idx)
+        dir_idx = np.sort(dir_idx)
+        freq_idx = np.sort(freq_idx)
+        Na = len(ant_idx)
+        Nt = len(time_idx)
+        Nd = len(dir_idx)
+        Nf = len(freq_idx)
+        indices = np.meshgrid(ant_idx,time_idx,dir_idx,freq_idx,indexing='ij')
+        self.variance[indices] = variance
+                
+
+    def get_variance(self,ant_idx=[],time_idx=[], dir_idx=[],freq_idx=-1):
+        '''Retrieve the specified variance solutions corresponding to the requested indices.
+        value of -1 means all.'''
+        #assert self.ref_ant is not None, "set reference antenna first"
+        if ant_idx is -1:
+            ant_idx = np.arange(self.Na)
+        if time_idx is -1:
+            time_idx = np.arange(self.Nt)
+        if dir_idx is -1:
+            dir_idx = np.arange(self.Nd)
+        if freq_idx is -1:
+            freq_idx = np.arange(self.Nf)
+        ant_idx = np.sort(ant_idx)
+        time_idx = np.sort(time_idx)
+        dir_idx = np.sort(dir_idx)
+        freq_idx = np.sort(freq_idx)
+        Na = len(ant_idx)
+        Nt = len(time_idx)
+        Nd = len(dir_idx)
+        Nf = len(freq_idx)
+        output = np.zeros([Na,Nt,Nd,Nf],dtype=np.double)
+        indices = np.meshgrid(ant_idx,time_idx,dir_idx,freq_idx,indexing='ij')
+        return output
+
 
                 
     def set_phase(self,phase,ant_idx=[],time_idx=[], dir_idx=[],freq_idx = -1, ref_ant=None):
@@ -327,17 +382,19 @@ class DataPack(object):
         Nt = len(time_idx)
         Nd = len(dir_idx)
         Nf = len(freq_idx)
-        i = 0
-        while i < Na:
-            j = 0
-            while j < Nt:
-                k = 0
-                while k < Nd:
-                    for l in range(Nf):
-                        self.phase[ant_idx[i],time_idx[j],dir_idx[k],freq_idx[l]] = phase[i,j,k,l]
-                    k += 1
-                j += 1
-            i += 1
+        indices = np.meshgrid(ant_idx,time_idx,dir_idx,freq_idx,indexing='ij')
+        self.phase[indices] = phase
+#        i = 0
+#        while i < Na:
+#            j = 0
+#            while j < Nt:
+#                k = 0
+#                while k < Nd:
+#                    for l in range(Nf):
+#                        self.phase[ant_idx[i],time_idx[j],dir_idx[k],freq_idx[l]] = phase[i,j,k,l]
+#                    k += 1
+#                j += 1
+#            i += 1
         if ref_ant is not None:
             self.set_reference_antenna(ref_ant)
         else:
