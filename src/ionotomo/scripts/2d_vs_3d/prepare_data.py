@@ -28,13 +28,15 @@ def plot(filename):
 if __name__=="__main__":
 #    plot("datapack_vanWeeren_partial_v1.hdf5")
 #    exit()
+    time_idx = range(400)
+    freq_idx = range(1)
     datapack = DataPack(filename="../rvw_data_analysis/rvw_datapack.hdf5")
     
     antennas,antenna_labels = datapack.get_antennas(ant_idx=-1)
-    times,timestamps = datapack.get_times(time_idx=range(400))
+    times,timestamps = datapack.get_times(time_idx=time_idx)
     directions,patch_names = datapack.get_directions(dir_idx=-1)
-    freqs = datapack.get_freqs(freq_idx=-1)
-    phase = datapack.get_phase(ant_idx=-1,time_idx=range(400),dir_idx=-1,freq_idx=-1)
+    freqs = datapack.get_freqs(freq_idx=freq_idx)
+    phase = datapack.get_phase(ant_idx=-1,time_idx=time_idx,dir_idx=-1,freq_idx=freq_idx)
 
     Na = len(antennas)
     Nt = len(times)
@@ -45,7 +47,7 @@ if __name__=="__main__":
             for l in range(Nf):
                 phase[i,:,k,l] = phase_unwrapp1d(phase[i,:,k,l])
 
-    print(Na*Nt*Nd*Nf*8*8/1024/1024)
+    print("Size: {} GB".format(Na*Nt*Nd*Nf*8*8/1024/1024))
 
     output = h5py.File("datapack_vanWeeren_partial_v1.hdf5",'w')
 
@@ -92,16 +94,16 @@ if __name__=="__main__":
     datapack_screen = phase_screen_datapack(10,datapack=datapack)
 
     antennas,antenna_labels = datapack_screen.get_antennas(ant_idx=-1)
-    times,timestamps = datapack_screen.get_times(time_idx=-1)
+    times,timestamps = datapack_screen.get_times(time_idx=time_idx)
     directions,patch_names = datapack_screen.get_directions(dir_idx=-1)
     freqs = datapack_screen.get_freqs(freq_idx=-1)
-    phase = datapack_screen.get_phase(ant_idx=-1,time_idx=-1,dir_idx=-1,freq_idx=-1)
+    phase = datapack_screen.get_phase(ant_idx=-1,time_idx=time_idx,dir_idx=-1,freq_idx=freq_idx)
 
     Na = len(antennas)
     Nt = len(times)
     Nd = len(directions)
     Nf = len(freqs)
-    print(Na*Nt*Nd*Nf*8*8/1024/1024)
+    print("Size: {} GB".format(Na*Nt*Nd*Nf*8*8/1024/1024))
 
     output['/data/rays_uvw_star'] = np.zeros((Na,Nt,Nd,Nf,8),dtype=float)
     output['/data/phase_ystar'] = np.zeros_like(phase)
