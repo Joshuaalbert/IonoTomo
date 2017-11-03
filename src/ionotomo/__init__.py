@@ -9,7 +9,7 @@ from .inversion.iterative_newton import iterative_newton_solve
 from .inversion.line_search import line_search
 from .inversion.solution import Solution, transfer_solutions
 
-from .astro.antenna_facet_selection import select_random_facets, select_facets, select_antennas, select_antennas_facets
+from .astro.antenna_facet_selection import select_random_facets, select_facets, select_antennas, select_antennas_idx, select_antennas_facets
 from .astro.fit_tec_2d import fit_datapack
 from .astro.radio_array import RadioArray, generate_example_radio_array
 from .astro.real_data import DataPack, generate_example_datapack, phase_screen_datapack

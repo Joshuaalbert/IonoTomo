@@ -203,9 +203,13 @@ def plot_datapack(datapack,ant_idx=-1,time_idx=[0], dir_idx=-1,freq_idx=-1,figna
     times,timestamps = datapack.get_times(time_idx=time_idx)
     freqs = datapack.get_freqs(freq_idx=freq_idx)
     if observable == 'phase':
-        phase_obs = np.angle(np.exp(1j*datapack.get_phase(ant_idx = ant_idx,dir_idx=dir_idx,time_idx=time_idx, freq_idx = freq_idx)))
+        phase_obs = datapack.get_phase(ant_idx = ant_idx,dir_idx=dir_idx,time_idx=time_idx, freq_idx = freq_idx)
     elif observable == 'prop':
         phase_obs = np.angle(np.exp(1j*datapack.get_prop(ant_idx = ant_idx,dir_idx=dir_idx,time_idx=time_idx, freq_idx = freq_idx)))
+    elif observable == 'variance':
+        phase_obs = datapack.get_variance(ant_idx = ant_idx,dir_idx=dir_idx,time_idx=time_idx, freq_idx = freq_idx)
+
+
 
     Na = len(antennas)
     Nt = len(times)
@@ -229,8 +233,7 @@ def plot_datapack(datapack,ant_idx=-1,time_idx=[0], dir_idx=-1,freq_idx=-1,figna
             M = int(np.ceil(np.sqrt(Na)))
             fig = plt.figure(figsize=(4*M,4*M))
             #use direction average as phase tracking direction
-            vmax = np.pi
-            vmin = -np.pi
+            
             
             N = 25
             
@@ -253,8 +256,20 @@ def plot_datapack(datapack,ant_idx=-1,time_idx=[0], dir_idx=-1,freq_idx=-1,figna
                 ax.set_xlabel("Projected East km")
                 ax.set_ylabel("Projected West km")
                 
+                if observable == 'variance':
+                    vmax = np.max(phase_obs)
+                    vmin = np.min(phase_obs)
+                    D = interp_nearest(dirs_uvw.u.value*factor300,dirs_uvw.v.value*factor300,phase_obs[i,idx,:,Nf>>1],U.flatten(),V.flatten()).reshape(U.shape)
+                    phase_cmap = plt.cm.bone
+                else:
+                    vmax = np.pi
+                    vmin = -np.pi
+                    vmax = np.max(phase_obs)
+                    vmin = np.min(phase_obs)
+                    phase_cmap = cmocean.cm.phase
+                    #D = interp_nearest(dirs_uvw.u.value*factor300,dirs_uvw.v.value*factor300,np.angle(np.exp(1j*phase_obs[i,idx,:,Nf>>1])),U.flatten(),V.flatten()).reshape(U.shape)
+                    D = interp_nearest(dirs_uvw.u.value*factor300,dirs_uvw.v.value*factor300,phase_obs[i,idx,:,Nf>>1],U.flatten(),V.flatten()).reshape(U.shape)
                 
-                D = interp_nearest(dirs_uvw.u.value*factor300,dirs_uvw.v.value*factor300,np.angle(np.exp(1j*phase_obs[i,idx,:,Nf>>1])),U.flatten(),V.flatten()).reshape(U.shape)
                 im = ax.imshow(D,origin='lower',extent=(np.min(U),np.max(U),np.min(V),np.max(V)),aspect='auto',
                               vmin = vmin, vmax= vmax,cmap=phase_cmap,alpha=1.)
                 sc1 = ax.scatter(dirs_uvw.u.value*factor300,dirs_uvw.v.value*factor300, c='black',

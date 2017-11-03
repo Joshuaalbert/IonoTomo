@@ -1,10 +1,12 @@
 numpy
 scipy
 h5py
-glib
 matplotlib
 jupyter
 notebook
 ipython
 scipy
 astropy
+tf-nightly
+cmocean
+dask[complete]

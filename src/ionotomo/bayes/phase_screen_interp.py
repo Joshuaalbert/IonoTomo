@@ -52,9 +52,15 @@ class KernelND(object):
         with tf.variable_scope("{}_hyperparams".format(type(self).__name__)):
             #self.batch_size = tf.placeholder(tf.int32,shape=(), name='batch_size')
             self.variables = {}
+            self.variables_ = {}
             for name in self.hyperparams.keys():
                 bounds = self.hyperparams_bounds[name]
-                value = [self.hyperparams[name]]
+                if not isinstance(self.hyperparams[name],(list,tuple)):
+                    try:
+                        self.hyperparams[name] = list(self.hyperparams[name])
+                    except:
+                        self.hyperparams[name] = [self.hyperparams[name]]
+                value = self.hyperparams[name]
                 if multi_dataset:
                     shape=[1,1,1]
                 else:
@@ -79,6 +85,7 @@ class KernelND(object):
                             name,
                             initializer=tf.ones(shape,tf.float64)*tf.constant(value,dtype=tf.float64),
                             trainable=not self.fixed[name]) 
+                self.variables_[name] = self.variables[name]
                 self.variables[name] = tf.clip_by_value(self.variables[name],bounds[0],bounds[1])
                 #batch_size , 1, 1
                 #self.variables[name] = tf.expand_dims(tf.expand_dims(self.variables[name],axis=-1),axis=-1)
@@ -97,7 +104,7 @@ class KernelND(object):
 #            feed_dict[self.sync_placeholders[name]] = self.hyperparams[name]
 #        sess.run(self.sync_ops,feed_dict=feed_dict)
 
-    def call(self,X,Y=None,share_x=False):
+    def call(self,X,Y=None,share_x=False,eval_derivative=False):
         """Construct the sub graph defining this kernel.
         Return an output tensor"""
         raise NotImplementedError("Setup in subclass")
@@ -130,11 +137,18 @@ class KernelND(object):
         assert len(hp) == len(self.hyperparams)
         assert isinstance(hp,dict)
         self.hyperparams.update(hp)
-    def get_hyperparams(self):
-        return self.hyperparams
+    def get_hyperparams(self,idx=None):
+        if idx is None:
+            idx = slice(self.batch_size)
+        hp = {}
+        for name in self.hyperparams:
+            hp[name] = self.hyperparams[name][idx]
+        return hp
     def get_variables(self):
         return self.variables
-                
+
+    def get_variables_(self):
+        return self.variables_
     def __add__(self,K):
         '''Add another Kernel or SumKernel. Creates a SumKernel object'''
         assert isinstance(K,KernelND), "Can only add kernels to kernels"
@@ -204,15 +218,21 @@ class MultiKernel(KernelND):
         for K in self.kernels:
             var.append(K.get_variables())
         return var
+    def get_variables_(self):
+        var = []
+        for K in self.kernels:
+            var.append(K.get_variables_())
+        return var
+
         
 class SumKernel(MultiKernel):
     def __init__(self,kernels,**kwargs):
         super(SumKernel,self).__init__(kernels,**kwargs)    
         assert len(self.kernels) > 1
-    def call(self,X,Y=None,share_x=False):
+    def call(self,X,Y=None,share_x=False,eval_derivative=False):
         """Construct the sub graph defining this kernel.
         Return an output tensor"""
-        output = self.kernels[0].call(X,Y,share_x)
+        output = self.kernels[0].call(X,Y,share_x,eval_derivative=eval_derivative)
         for i in range(1,len(self.kernels)):
             output += self.kernels[i].call(X,Y,share_x)
         return output
@@ -230,8 +250,8 @@ class ProductKernel(MultiKernel):
     def __init__(self,kernels,**kwargs):
         super(ProductKernel,self).__init__(kernels,**kwargs)
         assert len(self.kernels) > 1
-    def call(self,X,Y=None,share_x=False):
-        output = self.kernels[0].call(X,Y,share_x)
+    def call(self,X,Y=None,share_x=False,eval_derivative=False):
+        output = self.kernels[0].call(X,Y,share_x,eval_derivative=eval_derivative)
         for i in range(1,len(self.kernels)):
             output *= self.kernels[i].call(X,Y,share_x)
         return output
@@ -250,8 +270,8 @@ class PowKernel(MultiKernel):
         assert int(b) == b, "only integer powers are valid kernels"
         self.b = int(b)
         assert len(self.kernels) == 1
-    def call(self,X,Y=None,share_x=False):
-        output = self.kernels[0].call(X,Y,share_x)**self.b
+    def call(self,X,Y=None,share_x=False,eval_derivative=False):
+        output = self.kernels[0].call(X,Y,share_x,eval_derivative=eval_derivative)**self.b
         return output
     def __repr__(self):
         s = "*****POW({})******\n".format(self.b)
@@ -288,7 +308,7 @@ def pdist(x):
 class SquaredExponential(KernelND):
     def __init__(self,_hyperparams={'l':1.,'sigma':1.},**kwargs):
         super(SquaredExponential,self).__init__(_hyperparams=_hyperparams,**kwargs)
-    def call(self,X,Y=None,share_x=False):
+    def call(self,X,Y=None,share_x=False,eval_derivative=False):
         """return SE kernel.
         inputs : Tenor (batch_size,ndims)
             Input coordinates in ndims
@@ -302,13 +322,17 @@ class SquaredExponential(KernelND):
         else:
             x2 = cdist(X,Y)
         out = self.variables['sigma']**2 * tf.exp(-x2/(2*self.variables['l']**2))
+        if eval_derivative:
+            grad = {'sigma': out / self.variables['sigma'],
+                    'l': out * x2/(self.variables['l']**3) }
+            return out, grad
         return out
 
 class SquaredExponentialSep(KernelND):
     def __init__(self,dim,_hyperparams={'l':1.,'sigma':1.},**kwargs):
         super(SquaredExponentialSep,self).__init__(_hyperparams=_hyperparams,**kwargs)
         self.dim = int(dim)
-    def call(self,X,Y=None,share_x=False):
+    def call(self,X,Y=None,share_x=False,eval_derivative=False):
         """return SE kernel.
         inputs : Tenor (batch_size,ndims)
             Input coordinates in ndims
@@ -322,12 +346,17 @@ class SquaredExponentialSep(KernelND):
         else:
             x2 = cdist(X[:,:,self.dim:self.dim+1],Y[:,:,self.dim:self.dim+1])
         out = self.variables['sigma']**2 * tf.exp(-x2/(2*self.variables['l']**2))
+        if eval_derivative:
+            grad = {'sigma': out / self.variables['sigma'],
+                    'l': out * x2/(self.variables['l']**3) }
+            return out, grad
+
         return out
 
 class GammaExponential(KernelND):
     def __init__(self,_hyperparams={'l':1.,'gamma':1.,'sigma':1.},**kwargs):
         super(GammaExponential,self).__init__(_hyperparams=_hyperparams,_hyperparams_bounds={'gamma':[1e-5,2.]},**kwargs)
-    def call(self,X,Y=None,share_x=False):
+    def call(self,X,Y=None,share_x=False,eval_derivative=False):
         # batch_size,ndims, 1
         if share_x:
             X = tf.expand_dims(X,0)
@@ -342,7 +371,7 @@ class GammaExponentialSep(KernelND):
     def __init__(self,dim,_hyperparams={'l':1.,'gamma':1.,'sigma':1.},**kwargs):
         super(GammaExponentialSep,self).__init__(_hyperparams=_hyperparams,_hyperparams_bounds={'gamma':[1e-5,2.]},**kwargs)
         self.dim = int(dim)
-    def call(self,X,Y=None,share_x=False):
+    def call(self,X,Y=None,share_x=False,eval_derivative=False):
         # batch_size,ndims, 1
         if share_x:
             X = tf.expand_dims(X,0)
@@ -357,7 +386,7 @@ class MaternP(KernelND):
     def __init__(self,p=1,_hyperparams={'l':1.,'sigma':1.},**kwargs):
         super(MaternP,self).__init__(_hyperparams=_hyperparams,**kwargs)
         self.p=int(p)
-    def call(self,X,Y=None,share_x=False):
+    def call(self,X,Y=None,share_x=False,eval_derivative=False):
         from scipy.misc import factorial
         # batch_size,ndims, 1
         if share_x:
@@ -384,7 +413,7 @@ class MaternPSep(KernelND):
         super(MaternPSep,self).__init__(_hyperparams=_hyperparams,**kwargs)
         self.dim=int(dim)
         self.p=int(p)
-    def call(self,X,Y=None,share_x=False):
+    def call(self,X,Y=None,share_x=False,eval_derivative=False):
         from scipy.misc import factorial
         # batch_size,ndims, 1
         if share_x:
@@ -410,7 +439,7 @@ class MaternPSep(KernelND):
 class Periodic(KernelND):
     def __init__(self,_hyperparams={'l':1.,'p':1.,'sigma':1.},**kwargs):
         super(Periodic,self).__init__(_hyperparams=_hyperparams,**kwargs)
-    def call(self,X,Y=None,share_x=False):
+    def call(self,X,Y=None,share_x=False,eval_derivative=False):
         # batch_size,ndims, 1
 #        if share_x:
 #            X = tf.expand_dims(X,0)
@@ -426,7 +455,7 @@ class PeriodicSep(KernelND):
     def __init__(self,dim,_hyperparams={'l':1.,'p':1.,'sigma':1.},**kwargs):
         super(PeriodicSep,self).__init__(_hyperparams=_hyperparams,**kwargs)
         self.dim = int(dim)
-    def call(self,X,Y=None,share_x=False):
+    def call(self,X,Y=None,share_x=False,eval_derivative=False):
         # batch_size,ndims, 1
 #        if share_x:
 #            X = tf.expand_dims(X,0)
@@ -441,7 +470,7 @@ class PeriodicSep(KernelND):
 class Diagonal(KernelND):
     def __init__(self,_hyperparams={'sigma':1.},**kwargs):
         super(Diagonal,self).__init__(_hyperparams=_hyperparams,**kwargs)
-    def call(self,X,Y=None,share_x=False):
+    def call(self,X,Y=None,share_x=False,eval_derivative=False):
         # batch_size,ndims, 1
 #        if share_x:
 #            X = tf.expand_dims(X,0)
@@ -458,7 +487,7 @@ class Diagonal(KernelND):
 class RationalQuadratic(KernelND):
     def __init__(self,_hyperparams={'l':1.,'alpha':1.,'sigma':1.},**kwargs):
         super(RationalQuadratic,self).__init__(_hyperparams=_hyperparams,**kwargs)
-    def call(self,X,Y=None,share_x=False):
+    def call(self,X,Y=None,share_x=False,eval_derivative=False):
         # batch_size,ndims, 1
 #        if share_x:
 #            X = tf.expand_dims(X,0)
@@ -474,7 +503,7 @@ class RationalQuadraticSep(KernelND):
     def __init__(self,dim,_hyperparams={'l':1.,'alpha':1.,'sigma':1.},**kwargs):
         super(RationalQuadraticSep,self).__init__(_hyperparams=_hyperparams,**kwargs)
         self.dim = int(dim)
-    def call(self,X,Y=None,share_x=False):
+    def call(self,X,Y=None,share_x=False,eval_derivative=False):
         # batch_size,ndims, 1
 #        if share_x:
 #            X = tf.expand_dims(X,0)
@@ -490,7 +519,7 @@ class DotProduct(KernelND):
     def __init__(self,_hyperparams={'c':0,'sigma_b':1.,'sigma_v':1.},**kwargs):
         super(DotProduct,self).__init__(_hyperparams=_hyperparams,
                 _hyperparams_bounds={'c':[-1e5,1e5]},**kwargs)
-    def call(self,X,Y=None,share_x=False):
+    def call(self,X,Y=None,share_x=False,eval_derivative=False):
         # batch_size,ndims, 1
 #        if share_x:
 #            X = tf.expand_dims(X,0)
@@ -509,7 +538,7 @@ class DotProductSep(KernelND):
         super(DotProductSep,self).__init__(_hyperparams=_hyperparams,
                 _hyperparams_bounds={'c':[-1e5,1e5]},**kwargs)
         self.dim = int(dim)
-    def call(self,X,Y=None,share_x=False):
+    def call(self,X,Y=None,share_x=False,eval_derivative=False):
         # batch_size,ndims, 1
 #        if share_x:
 #            X = tf.expand_dims(X,0)
@@ -532,66 +561,83 @@ class PhaseScreen(KernelND):
     """
     def __init__(self,_hyperparams={'sigma_D':1.,
         'sigma_temporal':1.,'tau_slow': 1., 'tau_quick':1.,
-        'sigma_turb':1.,'l_inertia':1.,'L_outer':1., 
-        'sigma_angular':1., 'gamma':1.,
+        'sigma_spatial':1.,'l_inertial':1.,'L_outer':1., 'alpha': 1./6.,
         'sigma_freq':1., 'l_freq':1.},
-        _hyperparams_bounds={'sigma_D':[1e-5,10],
-        'sigma_temporal':[1e-5,10],'tau_slow': [100,1000], 'tau_quick':[16,100],
-        'sigma_turb':[1e-5,10],'l_inertia':[0.1,50],'L_outer':[20,100], 
-        'sigma_angular':[1e-5,10], 'gamma':[0.01,20],
-        'sigma_freq':[1e-5,10], 'l_freq':[0.2e6,50e5]},**kwargs):
+        _hyperparams_bounds={'sigma_D':[1e-5,np.pi],
+        'sigma_temporal':[1e-5,np.pi],'tau_slow': [100,1000], 'tau_quick':[16,100],
+        'sigma_spatial':[1e-5,3*np.pi],'l_inertial':[1,20],'L_outer':[4,10], 'alpha' : [1./100.,1e2],
+        'sigma_freq':[1e-5,np.pi], 'l_freq':[0.2e6,50e5]},**kwargs):
         super(PhaseScreen,self).__init__(_hyperparams=_hyperparams,
                 _hyperparams_bounds=_hyperparams_bounds,**kwargs)
-    def call(self,X,Y=None):
+        self.fixed['alpha'] = False
+
+    def call(self,X,Y=None,eval_derivative=False):
         # batch_size,npoints, (ant_u, ant_v, ant_w, time, dir_u, dir_v, dir_w, freq)
         if Y is None:
             xshape = tf.shape(X)
-            I = tf.eye(xshape[1],batch_shape=[xshape[0]])
-            t2 = pdist(X[:,:,3:4])
-            x2 = pdist(X[:,:,0:2])
+            I = tf.eye(xshape[1],batch_shape=[xshape[0]],dtype=tf.float64)
+            ray_tips = X[:,:,0:3] + X[:,:,4:7]*300./X[:,:,6:7]
+            x2 = pdist(ray_tips)
+            #t2 = pdist(X[:,:,3:4])
+            #x2 = pdist(X[:,:,0:2])
             #batch_size, num_points, 3
-            direction = X[:,:,4:7]
-            cos = tf.matmul(direction,direction,transpose_b=True)
-            sin2 = 1. - cos**2
-            f2 = pdist(X[:,:,7:8])
+            #f2 = pdist(X[:,:,7:8])
         else:
+            xshape = tf.shape(X)
             yshape = tf.shape(Y)
-            I = tf.eye(num_rows=xshape[1],num_columns=yshape[1],batch_shape=[xshape[0]])
-            t2 = cdist(X[:,:,3:4],Y[:,:,3:4])
-            x2 = cdist(X[:,:,0:2],Y[:,:,0:2])
+            I = tf.eye(num_rows=xshape[1],num_columns=yshape[1],batch_shape=[xshape[0]],dtype=tf.float64)
+            #t2 = cdist(X[:,:,3:4],Y[:,:,3:4])
+            #x2 = cdist(X[:,:,0:2],Y[:,:,0:2])
             #batch_size, num_points, 3
-            direction_X = X[:,:,4:7]
-            direction_Y = Y[:,:,4:7]
-            cos = tf.matmul(direction_X,direction_Y,transpose_b=True)
-            sin2 = 1. - cos**2
-            f2 = cdist(X[:,:,7:8],Y[:,:,7:8])
+            ray_tips_X = X[:,:,0:3] + X[:,:,4:7]*300./X[:,:,6:7]
+            ray_tips_Y = Y[:,:,0:3] + Y[:,:,4:7]*300./Y[:,:,6:7]
+            x2 = cdist(ray_tips_X, ray_tips_Y)
+            #f2 = cdist(X[:,:,7:8],Y[:,:,7:8])
 
         
         uncorrelated = self.variables['sigma_D']**2 * I
-        temporal = self.variables['sigma_temporal']**2 * tf.exp(-t2*(1./self.variables['tau_slow']**2 + 1./self.variables['tau_quick']**2)/2.)
-        alpha = 1./6.
-        r = x2/(2 * self.variables['l_inertial']**2 * alpha)
-        spatial = self.variables['sigma_turb']**2 * (1. + r)**alpha * tf.exp(-x2*(1./self.variables['L_outer']**2)/2.)
-        angular = self.variables['sigma_angular']**2 * tf.exp(-2.*sin2/self.variables['gamma']**2)
-        freq = self.variables['sigma_freq']**2 * tf.exp(-f2/(2.*self.variables['l_freq']**2))
+        #temporal = self.variables['sigma_temporal']**2 * tf.exp(-t2*(1./self.variables['tau_slow']**2 + 1./self.variables['tau_quick']**2)/2.)
+        #alpha = self.variables['alpha']
+        #r = x2/(2 * self.variables['l_inertial']**2 * alpha)
+        s_ = tf.exp(-x2*(1./self.variables['L_outer']**2)/2.)
 
-        out = uncorrelated + temporal + spatial + angular + freq
+        #spatial = self.variables['sigma_spatial']**2 * (1 +r)**alpha * s_
+        #freq = self.variables['sigma_freq']**2 * tf.exp(-f2/(2.*self.variables['l_freq']**2))
+        spatial = self.variables['sigma_spatial']**2 * s_
 
+        out = uncorrelated + spatial # temporal + freq
+
+        if eval_derivative:
+            grad = {'sigma_D': uncorrelated/self.variables['sigma_D'],
+                    #'sigma_temporal': temporal/self.variables['sigma_temporal'],
+                    #'tau_slow':temporal * x2/(self.variables['tau_slow']**3),
+                    #'tau_quick':temporal * x2/(self.variables['tau_quick']**3),
+                    'sigma_spatial':spatial/self.variables['sigma_spatial'],
+                    #'l_inertial':self.variables['sigma_spatial']**2 * (1.+r)**(alpha-1) * s_ * ( -2.*r / self.variables['l_inertial']),
+                    'L_outer':spatial*x2/self.variables['L_outer']**3
+                    #'alpha':spatial*(tf.log(1+r) - r/(r+1))
+                    #'sigma_freq': freq/self.variables['sigma_freq'],
+                    #'l_freq':freq*f2/self.variables['l_freq']**3
+                    }
+            return out, grad
         return out 
 
 def is_singular(A):
     return np.linalg.cond(A) > 1/sys.float_info.epsilon
 
-def _level1_solve(x,y,sigma_y,xstar,K,use_cholesky):
+def _level1_solve(x,y,sigma_y,xstar,K,use_cholesky,batch_idx_from,batch_idx_to):
     with tf.variable_scope("level1_solve"):
         #batch_size
         n = tf.to_double(tf.shape(y)[1])
-        Knn = K.call(x)
-        Knm = K.call(x,xstar)
-        Kmm = K.call(xstar)
+        Knn = K.call(x)[batch_idx_from:batch_idx_to,:,:]
+        Knm = K.call(x,xstar)[batch_idx_from:batch_idx_to,:,:]
+        Kmm = K.call(xstar)[batch_idx_from:batch_idx_to,:,:]
+        y = y[batch_idx_from:batch_idx_to,:]
+        sigma_y = sigma_y[batch_idx_from:batch_idx_to,:]
         # batch_size, n,n
-        Kf = Knn + tf.matrix_diag(sigma_y,name='sigma_y_diag')
-        def _cho():
+        Kf = Knn + tf.matrix_diag(sigma_y**2,name='sigma_y2_diag')
+
+        def _cho(Kf=Kf,y=y):
             # batch_size, n, n
             L = tf.cholesky(Kf,name='L')
             # batch_size, n
@@ -607,16 +653,16 @@ def _level1_solve(x,y,sigma_y,xstar,K,use_cholesky):
             log_mar_like = -tf.reduce_sum(y*alpha,1)/2. - tf.reduce_sum(tf.log(tf.matrix_diag_part(L)),axis=1) - n*(np.log(2.*np.pi)/2.)
             return fstar,cov,log_mar_like
 
-        def _no_cho():
-            #Kf^-1 = Kf' (Kf Kf')^-1
-            det = tf.matrix_determinant(Kf,name='detKf')
-            det = tf.clip_by_value(det,1e-13, det)
-            logdet = tf.log(det)
-            #logdet = -tf.log(tf.matrix_determinant(tf.matrix_solve(Kf,tf.eye(n,batch_shape=[tf.shape(Kf)[0]],dtype=tf.float64))))
-            #det(Kf) = 1/det(Kf^-1)
-            #log(det(Kf)) = log(1./det(Kf^-1)) = -log(det(Kf^-1))
+        def _no_cho(Kf=Kf,y=y):
+            Kf = (Kf + tf.transpose(Kf,perm=[0,2,1]))/2.
+            e,v = tf.self_adjoint_eig(Kf)
+            e = tf.where(e > 1e-14, e, 1e-14*tf.ones_like(e))
+            Kf = tf.matmul(tf.matmul(v,tf.matrix_diag(e),transpose_a=True),v)
+
+            logdet = tf.reduce_sum(tf.where(e > 1e-14, tf.log(e), tf.zeros_like(e)),axis=-1,name='logdet')
+
             #batch_size, n, 1
-            alpha = tf.matrix_solve(Kf,tf.expand_dims(y,-1),name='solve_alpha')
+            alpha = tf.squeeze(tf.matrix_solve(Kf,tf.expand_dims(y,-1),name='solve_alpha'),axis=2)
             fstar = tf.matmul(Knm,tf.expand_dims(alpha,-1),transpose_a=True)
             cov = Kmm
             cov -= tf.matmul(Knm,tf.matrix_solve(Kf,Knm),transpose_a=True)
@@ -630,8 +676,8 @@ def _neg_log_mar_like(x,y,sigma_y,K,use_cholesky):
         n = tf.to_double(tf.shape(y)[1])
         Knn = K.call(x,x)
         # batch_size, n,n
-        Kf = Knn + tf.matrix_diag(sigma_y,name='sigma_y_diag')
-        def _cho(y=y):
+        Kf = Knn + tf.matrix_diag(sigma_y**2,name='sigma_y2_diag')
+        def _cho(Kf=Kf,y=y):
             # batch_size, n, n
             L = tf.cholesky(Kf,name='L')
             # batch_size, n
@@ -639,34 +685,115 @@ def _neg_log_mar_like(x,y,sigma_y,K,use_cholesky):
             neg_log_mar_like = tf.reduce_sum(y*alpha,1)/2. + tf.reduce_sum(tf.log(tf.matrix_diag_part(L)),axis=1) + n*(np.log(2.*np.pi)/2.)
             return neg_log_mar_like
 
-        def _no_cho(y=y):
-            det = tf.matrix_determinant(Kf,name='detKf')
-            det = tf.clip_by_value(det,1e-13, det)
-            logdet = tf.log(det)
-            #logdet = -tf.log(tf.matrix_determinant(tf.matrix_solve(Kf,tf.eye(n,batch_shape=[tf.shape(Kf)[0]],dtype=tf.float64))))
+        def _no_cho(Kf=Kf,y=y):
+            Kf = (Kf + tf.transpose(Kf,perm=[0,2,1]))/2.
+            e,v = tf.self_adjoint_eig(Kf)
+            e = tf.where(e > 1e-14, e, 1e-14*tf.ones_like(e))
+            Kf = tf.matmul(tf.matmul(v,tf.matrix_diag(e),transpose_a=True),v)
+
+            logdet = tf.reduce_sum(tf.where(e > 1e-8, tf.log(e), tf.zeros_like(e)),axis=-1,name='logdet')
+
+            #batch_size, n, 1
+            alpha = tf.squeeze(tf.matrix_solve(Kf,tf.expand_dims(y,-1),name='solve_alpha'),axis=2)
+            neg_log_mar_like = (tf.reduce_sum(y*alpha,axis=1) + logdet + n*np.log(2.*np.pi))/2.
+            return neg_log_mar_like
+#        result = tf.stack([_no_cho(tf.expand_dims(Kf_,0),tf.expand_dims(y_,0)) for Kf_, y_ in zip(tf.unstack(Kf),tf.unstack(y))])
+#        return result
+        return tf.cond(use_cholesky,_cho,_no_cho)
+
+def _derivative(K,hp):
+    K_diff = []
+    for k1 in tf.unstack(K,axis=0):#for batch
+        K_diff2 = []
+        for k2 in tf.unstack(k1,axis=0):#for row
+            K_diff3 = []
+            for k3 in tf.unstack(k2,axis=0):# for col
+                K_diff3.append(tf.stack(tf.gradients(k3,hp),axis=0))#num_hp ,1 ,1, 1
+            K_diff2.append(tf.stack(K_diff3,axis=0))#cols, num_hp,1,1,1
+        K_diff.append(tf.stack(K_diff2,axis=0))#rows,cols, num_hp,1,1,1
+    K_diff = tf.stack(K_diff,axis=0)#batch, ...
+    return K_diff
+
+def _neg_log_mar_like_and_grad(x,y,sigma_y,K,use_cholesky):
+    with tf.variable_scope("neg_log_mar_like"):
+        #batch_size
+        n = tf.to_double(tf.shape(y)[1])
+        Knn,grad = K.call(x,x,eval_derivative=True)
+        # batch_size, n,n
+        Kf = Knn + tf.matrix_diag(sigma_y**2,name='sigma_y2_diag')
+        # batch_size, num_hp, n, n
+        Kf_diff = grad#tf.stack([grad[name] for name in K.get_variables()],axis=1)
+        hp = [K.get_variables()[name] for name in K.get_variables()]
+        
+        def _cho(Kf=Kf,y=y,hp=hp,Kf_diff=Kf_diff):
+            # batch_size, n, n
+            L = tf.cholesky(Kf,name='L')
+            # batch_size, n,1
+            alpha = tf.cholesky_solve(L, tf.expand_dims(y,-1), name='alpha')
+            neg_log_mar_like = tf.reduce_sum(y*tf.squeeze(alpha,axis=2),1)/2. + tf.reduce_sum(tf.log(tf.matrix_diag_part(L)),axis=1) + n*(np.log(2.*np.pi)/2.)
+            aa = tf.matmul(alpha,alpha,transpose_b=True)
+            grad = {}
+            for name in Kf_diff:#tf.unstack(Kf_diff,axis=1):
+                k_diff = Kf_diff[name]
+                aaK = tf.matmul(aa,k_diff,name='aaK')
+                KK = tf.cholesky_solve(L, k_diff, name='KK')
+                grad_ = (tf.trace(aaK) - tf.trace(KK))/2.
+                grad_ = tf.where(tf.is_finite(grad_),grad_,tf.zeros_like(grad_))
+                grad[name] = -grad_              
+
+            return neg_log_mar_like, grad
+
+        def _no_cho(Kf=Kf,y=y,hp=hp,Kf_diff=Kf_diff):
+            Kf = (Kf + tf.transpose(Kf,perm=[0,2,1]))/2.
+            e,v = tf.self_adjoint_eig(Kf)
+            e = tf.where(e > 1e-14, e, 1e-14*tf.ones_like(e))
+            Kf = tf.matmul(tf.matmul(v,tf.matrix_diag(e),transpose_a=True),v)
+
+            logdet = tf.reduce_sum(tf.where(e > 1e-14, tf.log(e), tf.zeros_like(e)),axis=-1,name='logdet')
 
             #batch_size, n, 1
             alpha = tf.matrix_solve(Kf,tf.expand_dims(y,-1),name='solve_alpha')
-            neg_log_mar_like = (tf.reduce_sum(y*alpha,axis=1) + logdet + n*np.log(2.*np.pi))/2.
-            return neg_log_mar_like
+            neg_log_mar_like = (tf.reduce_sum(y*tf.squeeze(alpha,axis=2),axis=1) + logdet + n*np.log(2.*np.pi))/2.
+            aa = tf.matmul(alpha,alpha,transpose_b=True)
+            grad = {}
+            for name in Kf_diff:#tf.unstack(Kf_diff,axis=1):
+                k_diff = Kf_diff[name]
+                
+                aaK = tf.matmul(aa,k_diff,name='aaK')
+            
+                KK = tf.matrix_solve(Kf, k_diff, name='KK')
+                grad_ = (tf.trace(aaK) - tf.trace(KK))/2.
+                grad_ = tf.where(tf.is_finite(grad_),grad_,tf.zeros_like(grad_))
+                grad[name] = -grad_
+                        
+            return neg_log_mar_like, grad
+#        result = tf.stack([_no_cho(tf.expand_dims(Kf_,0),tf.expand_dims(y_,0)) for Kf_, y_ in zip(tf.unstack(Kf),tf.unstack(y))])
+#        return result
         return tf.cond(use_cholesky,_cho,_no_cho)
+
         
 def _level2_optimize(x,y,sigma_y,K,use_cholesky,learning_rate):
     with tf.variable_scope("level2_solve"):
         optimizer = tf.train.AdamOptimizer(learning_rate)
-        neg_log_mar_like =_neg_log_mar_like(x,y,sigma_y,K,use_cholesky)
-        out = optimizer.minimize(tf.reduce_sum(neg_log_mar_like))
+        neg_log_mar_like, grad =_neg_log_mar_like_and_grad(x,y,sigma_y,K,use_cholesky)
+        grad = [(tf.expand_dims(tf.expand_dims(grad[name],-1),-1),K.get_variables_()[name]) for name in grad] 
+        print(grad)
+        #neg_log_mar_like =_neg_log_mar_like(x,y,sigma_y,K,use_cholesky)
+        #out = optimizer.minimize(tf.reduce_sum(neg_log_mar_like))
+        out = optimizer.apply_gradients(grad)
         return out, neg_log_mar_like
 
 class Pipeline(object):
     """This class defines the problems that are to be solved using Gaussian processes.
     In general many problems can be solved at once using batching so long 
     as the dimensions are the same."""
-    def __init__(self,batch_size,K,multi_dataset=False,share_x=False):
+    def __init__(self,batch_size,num_points,K,multi_dataset=False,share_x=False):
         assert isinstance(K,KernelND)
         self.K = K
-        self.K.build(batch_size=batch_size,multi_dataset=multi_dataset,use_initializer=True)
-        self.batch_size = batch_size
+        self.batch_size = int(batch_size)
+        self.num_points = num_points
+        self.K.build(batch_size=self.batch_size,multi_dataset=multi_dataset,use_initializer=True)
+        
         self.multi_dataset = multi_dataset
         self.share_x = share_x
         self.sess = tf.Session()
@@ -675,18 +802,22 @@ class Pipeline(object):
         
     def _build(self):
         with tf.variable_scope("pipeline"):
-            self.X = tf.placeholder(tf.float64,shape=None, name='X')
-            self.y = tf.placeholder(tf.float64,shape=None, name='y')
-            self.sigma_y = tf.placeholder(tf.float64,shape=None, name='sigma_y')
-            self.Xstar = tf.placeholder(tf.float64,shape=None, name='Xstar')
+            self.X = tf.placeholder(tf.float64,shape=[None,self.num_points,None], name='X')
+            self.y = tf.placeholder(tf.float64,shape=[None,self.num_points], name='y')
+            self.sigma_y = tf.placeholder(tf.float64,shape=[None,self.num_points], name='sigma_y')
+            self.Xstar = tf.placeholder(tf.float64,shape=[None,None,None], name='Xstar')
             self.use_cholesky = tf.placeholder(tf.bool,shape=(),name='use_cholesky')
+            self.batch_idx_from = tf.placeholder(tf.int32,shape=(),name='batch_idx_from')
+            self.batch_idx_to = tf.placeholder(tf.int32,shape=(),name='batch_idx_to')
 
-            self.ystar, self.cov, self.lml = _level1_solve(self.X,self.y,self.sigma_y,self.Xstar,self.K,self.use_cholesky)
+
+            self.ystar, self.cov, self.lml = _level1_solve(self.X,self.y,self.sigma_y,self.Xstar,self.K,self.use_cholesky,self.batch_idx_from,self.batch_idx_to)
+
             self.learning_rate = tf.placeholder(tf.float64,shape=None, name='learning_rate')
             self.level2_op, self.neg_log_mar_like = _level2_optimize(self.X,self.y,self.sigma_y,self.K,self.use_cholesky,self.learning_rate)
         
         
-    def level2_optimize(self,X,y,sigma_y,delta=0.,patience=20,epochs=1000):
+    def level2_optimize(self,X,y,sigma_y,delta=0.001,patience=20,epochs=1000):
         if self.share_x:
             if len(X.shape) == 2:
                 X = np.expand_dims(X,0)
@@ -703,9 +834,9 @@ class Pipeline(object):
         assert y.shape[1] == X.shape[1]
         assert y.shape == sigma_y.shape
 
-        feed_dict = {self.X : X,
-                self.y : y,
-                self.sigma_y : sigma_y,
+        feed_dict = {self.X : X.astype(float),
+                self.y : y.astype(float),
+                self.sigma_y : sigma_y.astype(float),
                 self.learning_rate : 0.01}
         
         neg_log_mar_lik_last = np.inf
@@ -720,25 +851,26 @@ class Pipeline(object):
             except:
                 feed_dict[self.use_cholesky] = False
                 _, neg_log_mar_lik = self.sess.run([self.level2_op,self.neg_log_mar_like],feed_dict=feed_dict)
-            print(neg_log_mar_lik)
+            print('Hamiltonian: {}'.format(neg_log_mar_lik))
             if (np.sum(neg_log_mar_lik)/np.sum(neg_log_mar_lik_last) - 1) > -delta:
                 patience_count += 1
-                feed_dict[self.learning_rate] /= 2.
-                feed_dict[self.learning_rate] = max(0.0001,feed_dict[self.learning_rate])
+                feed_dict[self.learning_rate] /= 3.
+                feed_dict[self.learning_rate] = max(0.00001,feed_dict[self.learning_rate])
                 if patience_count > patience:
                     break
             else:
                 neg_log_mar_lik_last = neg_log_mar_lik
                 patience_count = 0
-                feed_dict[self.learning_rate] *= 1.5
-                feed_dict[self.learning_rate] = min(0.1,feed_dict[self.learning_rate])
+                feed_dict[self.learning_rate] *= 3.
+                feed_dict[self.learning_rate] = min(0.5,feed_dict[self.learning_rate])
 
         hp = self.sess.run(self.K.get_variables())
         self.K.set_hyperparams(hp)
+        print(self.K)
 
         return neg_log_mar_lik
 
-    def level1_predict(self,X,y,sigma_y, Xstar=None, smooth=False):
+    def level1_predict(self,X,y,sigma_y, Xstar=None, smooth=False,batch_idx=None):
         '''
         Predictive distribution.
         X : array (batch_size,num_points, ndims)
@@ -753,13 +885,21 @@ class Pipeline(object):
             if True smooth using Xstar = X
         '''
 
+        if Xstar is None and smooth:
+            Xstar = X
+        assert Xstar is not None
+
         if self.share_x:
             if len(X.shape) == 2:
                 X = np.expand_dims(X,0)
+            if len(Xstar.shape) == 2:
+                Xstar = np.expand_dims(Xstar,0)
             if len(y.shape) == 1:
                 y = np.expand_dims(y,0)
+                y = np.tile(y,(self.batch_size,1))
             if len(sigma_y.shape) == 1:
                 sigma_y = np.expand_dims(sigma_y,0)
+                sigma_y = np.tile(sigma_y,(self.batch_size,1))
         else:
             assert len(X.shape) == 3
             assert len(y.shape) == 2
@@ -767,15 +907,21 @@ class Pipeline(object):
         assert y.shape[1] == X.shape[1]
         assert y.shape == sigma_y.shape
 
-        if Xstar is None and smooth:
-            Xstar = X
-        assert Xstar is not None
-        assert Xstar.shape == X.shape
         
-        feed_dict = {self.X : X,
-                self.y : y,
-                self.sigma_y : sigma_y,
-                self.Xstar : Xstar}
+        assert Xstar.shape[0] == X.shape[0]
+        
+        
+
+        feed_dict = {self.X : X.astype(float),
+                self.y : y.astype(float),
+                self.sigma_y : sigma_y.astype(float),
+                self.Xstar : Xstar.astype(float)}
+        if batch_idx is None:
+            feed_dict[self.batch_idx_from] = 0
+            feed_dict[self.batch_idx_to] = self.batch_size
+        else:
+            feed_dict[self.batch_idx_from] = int(batch_idx)
+            feed_dict[self.batch_idx_to] = int(batch_idx + 1)
 
         try:
             feed_dict[self.use_cholesky] = True
@@ -788,12 +934,11 @@ class Pipeline(object):
         return ystar,cov,lml
 
 def test_build():
-    X = np.random.uniform(size=[10,250,1])
-#    Xstar = np.linspace(-1,2,100)
-#    Xstar,Ystar = np.meshgrid(xstar,xstar)
-#    Xstar = np.expand_dims(np.array([Xstar.flatten(),Ystar.flatten()]).T,0)
-#    y = np.sin(X[:,:,0]*2*np.pi/0.5) *np.cos( X[:,:,1]*np.pi/0.5*2.) + np.random.normal(size=X.shape[0:2])*0.1
-    y = np.sin(X[:,:,0]*2*np.pi/0.5) + np.random.normal(size=X.shape[0:2])*0.1
+    X = np.random.uniform(size=[50,2])
+    xstar = np.linspace(-1,2,100)
+    Xstar,Ystar = np.meshgrid(xstar,xstar)
+    Xstar = np.expand_dims(np.array([Xstar.flatten(),Ystar.flatten()]).T,0)
+    y = np.sin(X[:,0]*2*np.pi/0.5) *np.cos( X[:,1]*np.pi/0.5*2.) + np.random.normal(size=X.shape[0])*0.1
     sigma_y = np.ones_like(y)*0.1
 
     K1 = SquaredExponential()
@@ -802,18 +947,22 @@ def test_build():
     K2 = DotProduct()
     #K3 = RationalQuadratic(hyperparams={'alpha':1./6.})
     #K3.fix('alpha')
+    K4 = Periodic()
     K = K1# * K3
-    p = Pipeline(10,K,multi_dataset=True,share_x = False)
+    p = Pipeline(20,None,K,multi_dataset=False,share_x = True)
     #print(p.level1_predict(X,y,sigma_y,smooth=True))
     print(K)
-    print(p.level2_optimize(X,y,sigma_y,patience=20))
+    win_arg = np.argmin(p.level2_optimize(X,y,sigma_y,patience=20))
     print(K)
-    ystar,cov,lml = p.level1_predict(X,y,sigma_y,smooth=True)
+    ystar,cov,lml = p.level1_predict(X,y,sigma_y,Xstar,smooth=False,batch_idx=win_arg)
+    var = np.diag(cov[0,:,:])
     import pylab as plt
-    for i in range(10):
-        plt.scatter(X[i,:,0],y[i,:])
-        plt.scatter(X[i,:,0],ystar[i,:])
-        plt.show()
-    
+    from mpl_toolkits.mplot3d import Axes3D
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.scatter(X[:,0],X[:,1],y[:],cmap='bone')
+    ax.scatter(Xstar[0,:,0],Xstar[0,:,1],ystar[0,:],cmap='bone')
+    plt.show()
+    print(var)    
 if __name__=='__main__':
     test_build()
