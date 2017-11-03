@@ -23,8 +23,11 @@ install:
   # Useful for debugging any issues with conda
   - conda info -a
 
-  - conda create -q -n test-environment python=$TRAVIS_PYTHON_VERSION numpy scipy matplotlib h5py
+  - conda create -q -n test-environment python=$TRAVIS_PYTHON_VERSION
   - source activate test-environment
+  - git clone https://github.com/Joshuaalbert/RadioAstronomyThings.git $HOME/rathings && cd $HOME/rathings && python setup.py install && cd -
+  - git clone https://github.com/rilma/TimeUtilities.git $HOME/timeutilities && cd $HOME/timeutilities && python setup.py install && cd -
+  - git clone https://github.com/rilma/pyIRI2016.git $HOME/pyiri2016 && cd $HOME/pyiri2016 && python setup.py develop && cd -
   # install PIL for preprocessing tests
   - pip install -r pip-requirements.txt
   - python setup.py -q install
