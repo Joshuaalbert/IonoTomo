@@ -1,0 +1,12 @@
+numpy
+scipy
+h5py
+PyQt5
+matplotlib
+jupyter
+notebook
+ipython
+scipy
+astropy
+cmocean
+dask[complete]
