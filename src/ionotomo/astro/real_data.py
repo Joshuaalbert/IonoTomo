@@ -34,7 +34,7 @@ class DataPack(object):
     def get_data_dict(self):
         return {'radio_array':self.radio_array, 'antennas':self.antennas, 'antenna_labels':self.antenna_labels,
                         'times':self.times, 'timestamps':self.timestamps, 'directions':self.directions,
-                        'patch_names' : self.patch_names, 'freqs':self.freqs,'phase':self.phase,'ref_ant':self.ref_ant, 'const':self.const, 'clock':self.clock, 'prop':self.prop, 'variance': self.variance}
+                        'patch_names' : self.patch_names, 'freqs':self.freqs,'phase':self.phase,'ref_ant':self.ref_ant, 'const':self.const, 'clock':self.clock, 'variance': self.variance}
 
     def clone(self):
         datapack = DataPack(self.get_data_dict())
@@ -62,8 +62,6 @@ class DataPack(object):
         freqs[...] = self.freqs
         phase = f.create_dataset("datapack/phase",(self.Na,self.Nt,self.Nd,self.Nf),dtype=np.double)
         phase[:,:,:,:] = self.phase
-        prop = f.create_dataset("datapack/prop",(self.Na,self.Nt,self.Nd,self.Nf),dtype=np.double)
-        prop[:,:,:,:] = self.prop
         variance = f.create_dataset("datapack/variance",(self.Na,self.Nt,self.Nd,self.Nf),dtype=np.double)
         variance[:,:,:,:] = self.variance
 
@@ -91,19 +89,30 @@ class DataPack(object):
         self.timestamps = f["datapack/times/timestamps"][:].astype(str)
         self.times = at.Time(self.timestamps,format='isot',scale='tai')
         self.freqs = f["datapack/freqs"][:]
-        self.phase = f["datapack/phase"][:,:,:,:]
-        self.prop = f["datapack/prop"][:,:,:,:]
-        try:
-            self.variance = f["datapack/variance"][:,:,:,:]
-        except:
-            self.variance = np.zeros_like(self.phase)
-        self.clock = f["datapack/clock"][:,:]
-        self.const = f["datapack/const"][:]
-        self.ref_ant = np.array(f["datapack/phase"].attrs['ref_ant']).astype(str).item(0)
         self.Na = len(self.antennas)
         self.Nt = len(self.times)
         self.Nd = len(self.directions)
         self.Nf = len(self.freqs)
+        try:
+            self.phase = f["datapack/phase"][:,:,:,:]
+        except:
+            self.phase = np.zeros([self.Na,self.Nt,self.Nd,self.Nf])
+        try:
+            self.variance = f["datapack/variance"][:,:,:,:]
+        except:
+            self.variance = np.zeros([self.Na,self.Nt,self.Nd,self.Nf])
+        try:
+            self.clock = f["datapack/clock"][:,:]
+        except:
+            self.clock = np.zeros([self.Na,self.Nt])
+        try:
+            self.const = f["datapack/const"][:]
+        except:
+            self.const = np.zeros(self.Na)
+        try:
+            self.ref_ant = np.array(f["datapack/phase"].attrs['ref_ant']).astype(str).item(0)
+        except:
+            self.ref_ant = None
         self.set_reference_antenna(self.ref_ant)
         f.close()
 
@@ -120,7 +129,7 @@ class DataPack(object):
                 'phase' : (np.array,"The phase for each antenna, time, direction, and frequency in radians"),
                 'const' : (np.array,"Constant phase offset param"),
                 'clock' : (np.array,"Clock term"),
-                'prop' : (np.array,"Propagation term"),
+                'prop' : (np.array,"Propagation term (depreciated)"),
                 'ref_ant' : (str,"The reference antenna label"),
                 'variance' : (np.array,"The variance of measurements")}
         return params
@@ -136,260 +145,187 @@ class DataPack(object):
     def add_data_dict(self,**args):
         '''Set up variables here that will hold references throughout'''
         params = self.define_params()
+
+        for attr in params:
+            setattr(self,attr,args.get(attr,None))
         
-        for attr in args.keys():
-            if attr in params.keys():
-                #not list testing
-                #assert isinstance(args[attr],params[attr][0], "Invalid attribute type {}. Help says {} is {}".format(type(args[attr]),attr,params[attr][1])
-                #print(attr)
-                try:
-                    setattr(self,attr,args[attr])
-                except:
-                    print("Failed to set {0} to {1}".format(attr,args[attr]))
         self.Na = len(self.antennas)
         self.Nt = len(self.times)
         self.Nd = len(self.directions)
         self.Nf = len(self.freqs)
-        assert self.phase.shape == (self.Na,self.Nt,self.Nd,self.Nf), "Invalid shape {} {}".format(self.phase.shape, (self.Na,self.Nt,self.Nd,self.Nf))
-        assert self.const.shape == (self.Na,)
-        assert self.clock.shape == (self.Na,self.Nt)
-        assert self.prop.shape == (self.Na,self.Nt,self.Nd,self.Nf), "Invalid shape {} {}".format(self.prop.shape, (self.Na,self.Nt,self.Nd,self.Nf))
-        assert self.variance.shape == (self.Na,self.Nt,self.Nd,self.Nf), "Invalid shape {} {}".format(self.variance.shape, (self.Na,self.Nt,self.Nd,self.Nf))
         self.antenna_labels = np.array(self.antenna_labels)
         self.patch_names = np.array(self.patch_names)
         self.timestamps = np.array(self.timestamps)
+        if self.phase is not None:
+            assert self.phase.shape == (self.Na,self.Nt,self.Nd,self.Nf), "Invalid shape {} {}".format(self.phase.shape, (self.Na,self.Nt,self.Nd,self.Nf))
+        if self.const is not None:
+            assert self.const.shape == (self.Na,)
+        if self.clock is not None:
+            assert self.clock.shape == (self.Na,self.Nt)
+        if self.variance is not None:
+            assert self.variance.shape == (self.Na,self.Nt,self.Nd,self.Nf), "Invalid shape {} {}".format(self.variance.shape, (self.Na,self.Nt,self.Nd,self.Nf))
+        
         if 'ref_ant' in args.keys():
             self.set_reference_antenna(args['ref_ant'])
-    
+
+    def set_slot(self, param, A, indices, set_ref_ant):
+        """Set slots in datapack.
+        param : str
+            the key of slot
+        A : array of corrct shape
+            the data to insert
+        indices : tuple of index array
+            Must be (ant_idx, time_idx, dir_idx, freq_idx)
+            Ignore an index by setting to None
+        set_ref_ant : bool
+            Whether to set the ref ant
+        """
+        assert isinstance(indices,(tuple,list))
+        ant_idx, time_idx, dir_idx, freq_idx = indices
+        if ant_idx is -1:
+            ant_idx = np.arange(self.Na)
+        if time_idx is -1:
+            time_idx = np.arange(self.Nt)
+        if dir_idx is -1:
+            dir_idx = np.arange(self.Nd)
+        if freq_idx is -1:
+            freq_idx = np.arange(self.Nf)
+
+        set_indices = []
+        if ant_idx is not None:
+            ant_idx = np.sort(ant_idx)
+            set_indices.append(ant_idx)
+        if time_idx is not None:
+            time_idx = np.sort(time_idx)
+            set_indices.append(time_idx)
+        if dir_idx is not None:
+            dir_idx = np.sort(dir_idx)
+            set_indices.append(dir_idx)
+        if freq_idx is not None:
+            freq_idx = np.sort(freq_idx)
+            set_indices.append(freq_idx)
+
+        indices = np.meshgrid(*set_indices, indexing='ij')
+
+        array = getattr(self,param,None)
+        if array is not None:
+            array[indices] = A
+        else:
+            raise ValueError("param does not exist {}".format(param))
+
+        if set_ref_ant:
+            if self.ref_ant is not None:
+                self.set_reference_antenna(self.ref_ant)
+
+    def get_slot(self, param, indices):
+        """Get slots in datapack.
+        param : str
+            the key of slot
+        indices : tuple of index array
+            Must be (ant_idx, time_idx, dir_idx, freq_idx)
+            Ignore an index by setting to None
+        Return an array of shape determined by indices
+        """
+        assert isinstance(indices,(tuple,list))
+        ant_idx, time_idx, dir_idx, freq_idx = indices
+        if ant_idx is -1:
+            ant_idx = np.arange(self.Na)
+        if time_idx is -1:
+            time_idx = np.arange(self.Nt)
+        if dir_idx is -1:
+            dir_idx = np.arange(self.Nd)
+        if freq_idx is -1:
+            freq_idx = np.arange(self.Nf)
+
+        set_indices = []
+        if ant_idx is not None:
+            ant_idx = np.sort(ant_idx)
+            set_indices.append(ant_idx)
+        if time_idx is not None:
+            time_idx = np.sort(time_idx)
+            set_indices.append(time_idx)
+        if dir_idx is not None:
+            dir_idx = np.sort(dir_idx)
+            set_indices.append(dir_idx)
+        if freq_idx is not None:
+            freq_idx = np.sort(freq_idx)
+            set_indices.append(freq_idx)
+
+        indices = np.meshgrid(*set_indices, indexing='ij')
+
+        array = getattr(self,param,None)
+        if array is not None:
+            return array[indices]
+        else:
+            raise ValueError("param does not exist {}".format(param))
+
     def set_const(self,const,ant_idx=[], ref_ant=None):
         '''Set the specified phase solutions corresponding to the requested indices.
         value of -1 means all.'''
-        if ant_idx is -1:
-            ant_idx = np.arange(self.Na)
-        ant_idx = np.sort(ant_idx)
-        Na = len(ant_idx)
-        self.clock[ant_idx] = const
-        if ref_ant is not None:
-            self.set_reference_antenna(ref_ant)
-        else:
-            if self.ref_ant is not None:
-                self.set_reference_antenna(self.ref_ant)
+        self.set_slot("const",const,(ant_idx,None,None,None),False)
+        self.set_reference_antenna(ref_ant)
 
 
     def get_const(self,ant_idx=[]):
         '''Retrieve the specified phase solutions corresponding to the requested indices.
         value of -1 means all.'''
-        #assert self.ref_ant is not None, "set reference antenna first"
-        if ant_idx is -1:
-            ant_idx = np.arange(self.Na)
-        ant_idx = np.sort(ant_idx)
-        Na = len(ant_idx)
-        output = self.const[ant_idx]
-        return output
-    
-    def set_clock(self,clock,ant_idx=[],time_idx=[], ref_ant=None):
+        return self.get_slot("const",(ant_idx,None,None,None))
+
+    def set_clock(self,clock,ant_idx=[], time_idx=[],ref_ant=None):
         '''Set the specified phase solutions corresponding to the requested indices.
         value of -1 means all.'''
-        if ant_idx is -1:
-            ant_idx = np.arange(self.Na)
-        if time_idx is -1:
-            time_idx = np.arange(self.Nt)
-        ant_idx = np.sort(ant_idx)
-        time_idx = np.sort(time_idx)
-        Na = len(ant_idx)
-        Nt = len(time_idx)
-        indices = np.meshgrid(ant_idx,time_ix,indexing='ij')
-        self.clock[indices] = clock
-        if ref_ant is not None:
-            self.set_reference_antenna(ref_ant)
-        else:
-            if self.ref_ant is not None:
-                self.set_reference_antenna(self.ref_ant)
+        self.set_slot("clock",clock,(ant_idx,time_idx,None,None),False)
+        self.set_reference_antenna(ref_ant)
 
 
     def get_clock(self,ant_idx=[],time_idx=[]):
         '''Retrieve the specified phase solutions corresponding to the requested indices.
         value of -1 means all.'''
-        #assert self.ref_ant is not None, "set reference antenna first"
-        if ant_idx is -1:
-            ant_idx = np.arange(self.Na)
-        if time_idx is -1:
-            time_idx = np.arange(self.Nt)
-        ant_idx = np.sort(ant_idx)
-        time_idx = np.sort(time_idx)
-        Na = len(ant_idx)
-        Nt = len(time_idx)
-        indices = np.meshgrid(ant_idx,time_ix,indexing='ij')
-        output = self.clock[indices]
-        return output
+        return self.get_slot("clock",(ant_idx,time_idx,None,None))
 
-    def set_prop(self,prop,ant_idx=[],time_idx=[], dir_idx=[],freq_idx = -1, ref_ant=None):
+    def set_phase(self,phase,ant_idx=[], time_idx=[],dir_idx=[],freq_idx=[],ref_ant=None):
         '''Set the specified phase solutions corresponding to the requested indices.
         value of -1 means all.'''
-        if ant_idx is -1:
-            ant_idx = np.arange(self.Na)
-        if time_idx is -1:
-            time_idx = np.arange(self.Nt)
-        if dir_idx is -1:
-            dir_idx = np.arange(self.Nd)
-        if freq_idx is -1:
-            freq_idx = np.arange(self.Nf)
-        ant_idx = np.sort(ant_idx)
-        time_idx = np.sort(time_idx)
-        dir_idx = np.sort(dir_idx)
-        freq_idx = np.sort(freq_idx)
-        Na = len(ant_idx)
-        Nt = len(time_idx)
-        Nd = len(dir_idx)
-        Nf = len(freq_idx)
-        indices = np.meshgrid(ant_idx,time_idx,dir_idx,freq_idx,indexing='ij')
-        self.prop[indices] = prop
-        if ref_ant is not None:
-            self.set_reference_antenna(ref_ant)
-        else:
-            if self.ref_ant is not None:
-                self.set_reference_antenna(self.ref_ant)
+        self.set_slot("phase",phase,(ant_idx,time_idx,dir_idx,freq_idx),False)
+        self.set_reference_antenna(ref_ant)
 
-
-    def get_prop(self,ant_idx=[],time_idx=[], dir_idx=[],freq_idx=-1):
+    def get_phase(self,ant_idx=[],time_idx=[],dir_idx=[],freq_idx=[]):
         '''Retrieve the specified phase solutions corresponding to the requested indices.
         value of -1 means all.'''
-        #assert self.ref_ant is not None, "set reference antenna first"
-        if ant_idx is -1:
-            ant_idx = np.arange(self.Na)
-        if time_idx is -1:
-            time_idx = np.arange(self.Nt)
-        if dir_idx is -1:
-            dir_idx = np.arange(self.Nd)
-        if freq_idx is -1:
-            freq_idx = np.arange(self.Nf)
-        ant_idx = np.sort(ant_idx)
-        time_idx = np.sort(time_idx)
-        dir_idx = np.sort(dir_idx)
-        freq_idx = np.sort(freq_idx)
-        Na = len(ant_idx)
-        Nt = len(time_idx)
-        Nd = len(dir_idx)
-        Nf = len(freq_idx)
-        indices = np.meshgrid(ant_idx,time_idx,dir_idx,freq_idx,indexing='ij')
-        output = self.prop[indices]
-        return output
+        return self.get_slot("phase",(ant_idx,time_idx,dir_idx,freq_idx))
 
-    def set_variance(self,variance,ant_idx=[],time_idx=[], dir_idx=[],freq_idx = -1, ref_ant=None):
+    def set_variance(self,variance,ant_idx=[], time_idx=[],dir_idx=[],freq_idx=[]):
         '''Set the specified variance solutions corresponding to the requested indices.
         value of -1 means all.'''
-        if ant_idx is -1:
-            ant_idx = np.arange(self.Na)
-        if time_idx is -1:
-            time_idx = np.arange(self.Nt)
-        if dir_idx is -1:
-            dir_idx = np.arange(self.Nd)
-        if freq_idx is -1:
-            freq_idx = np.arange(self.Nf)
-        ant_idx = np.sort(ant_idx)
-        time_idx = np.sort(time_idx)
-        dir_idx = np.sort(dir_idx)
-        freq_idx = np.sort(freq_idx)
-        Na = len(ant_idx)
-        Nt = len(time_idx)
-        Nd = len(dir_idx)
-        Nf = len(freq_idx)
-        indices = np.meshgrid(ant_idx,time_idx,dir_idx,freq_idx,indexing='ij')
-        self.variance[indices] = variance
-                
+        self.set_slot("variance",variance,(ant_idx,time_idx,dir_idx,freq_idx),False)
 
-    def get_variance(self,ant_idx=[],time_idx=[], dir_idx=[],freq_idx=-1):
+    def get_variance(self,ant_idx=[],time_idx=[],dir_idx=[],freq_idx=[]):
         '''Retrieve the specified variance solutions corresponding to the requested indices.
         value of -1 means all.'''
-        #assert self.ref_ant is not None, "set reference antenna first"
-        if ant_idx is -1:
-            ant_idx = np.arange(self.Na)
-        if time_idx is -1:
-            time_idx = np.arange(self.Nt)
-        if dir_idx is -1:
-            dir_idx = np.arange(self.Nd)
-        if freq_idx is -1:
-            freq_idx = np.arange(self.Nf)
-        ant_idx = np.sort(ant_idx)
-        time_idx = np.sort(time_idx)
-        dir_idx = np.sort(dir_idx)
-        freq_idx = np.sort(freq_idx)
-        Na = len(ant_idx)
-        Nt = len(time_idx)
-        Nd = len(dir_idx)
-        Nf = len(freq_idx)
-        #output = np.zeros([Na,Nt,Nd,Nf],dtype=np.double)
-        indices = np.meshgrid(ant_idx,time_idx,dir_idx,freq_idx,indexing='ij')
-        output = self.variance[indices]
-        return output
+        return self.get_slot("variance",(ant_idx,time_idx,dir_idx,freq_idx))
 
+    def set_prop(self,prop,ant_idx=[], time_idx=[],dir_idx=[],freq_idx=[],ref_ant=None):
+        '''Set the specified prop solutions corresponding to the requested indices.
+        value of -1 means all.
+        @depreciated
+        '''
+        self.set_slot("prop",prop,(ant_idx,time_idx,dir_idx,freq_idx),False)
+        self.set_reference_antenna(ref_ant)
 
-                
-    def set_phase(self,phase,ant_idx=[],time_idx=[], dir_idx=[],freq_idx = -1, ref_ant=None):
-        '''Set the specified phase solutions corresponding to the requested indices.
-        value of -1 means all.'''
-        if ant_idx is -1:
-            ant_idx = np.arange(self.Na)
-        if time_idx is -1:
-            time_idx = np.arange(self.Nt)
-        if dir_idx is -1:
-            dir_idx = np.arange(self.Nd)
-        if freq_idx is -1:
-            freq_idx = np.arange(self.Nf)
-        ant_idx = np.sort(ant_idx)
-        time_idx = np.sort(time_idx)
-        dir_idx = np.sort(dir_idx)
-        freq_idx = np.sort(freq_idx)
-        Na = len(ant_idx)
-        Nt = len(time_idx)
-        Nd = len(dir_idx)
-        Nf = len(freq_idx)
-        indices = np.meshgrid(ant_idx,time_idx,dir_idx,freq_idx,indexing='ij')
-        self.phase[indices] = phase
-        if ref_ant is not None:
-            self.set_reference_antenna(ref_ant)
-        else:
-            if self.ref_ant is not None:
-                self.set_reference_antenna(self.ref_ant)
-                
+    def get_prop(self,ant_idx=[],time_idx=[],dir_idx=[],freq_idx=[]):
+        '''Retrieve the specified prop solutions corresponding to the requested indices.
+        value of -1 means all.
+        @depreciated
+        '''
+        return self.get_slot("prop",(ant_idx,time_idx,dir_idx,freq_idx))
 
-    def get_phase(self,ant_idx=[],time_idx=[], dir_idx=[],freq_idx=-1):
-        '''Retrieve the specified phase solutions corresponding to the requested indices.
-        value of -1 means all.'''
-        #assert self.ref_ant is not None, "set reference antenna first"
-        if ant_idx is -1:
-            ant_idx = np.arange(self.Na)
-        if time_idx is -1:
-            time_idx = np.arange(self.Nt)
-        if dir_idx is -1:
-            dir_idx = np.arange(self.Nd)
-        if freq_idx is -1:
-            freq_idx = np.arange(self.Nf)
-        ant_idx = np.sort(ant_idx)
-        time_idx = np.sort(time_idx)
-        dir_idx = np.sort(dir_idx)
-        freq_idx = np.sort(freq_idx)
-        Na = len(ant_idx)
-        Nt = len(time_idx)
-        Nd = len(dir_idx)
-        Nf = len(freq_idx)
-        output = np.zeros([Na,Nt,Nd,Nf],dtype=np.double)
-        indices = np.meshgrid(ant_idx,time_idx,dir_idx,freq_idx,indexing='ij')
-        output = self.phase[indices]
-        return output
-    
     def get_antennas(self,ant_idx=[]):
         '''Get the list of antenna locations in itrs'''
         if ant_idx is -1:
             ant_idx = np.arange(self.Na)
         ant_idx = np.sort(ant_idx)
         output = self.antennas[ant_idx]
-        Na = len(ant_idx)
-        output_labels = []
-        i = 0
-        while i < Na:
-            output_labels.append(self.antenna_labels[ant_idx[i]])
-            i += 1
+        output_labels = self.antenna_labels[ant_idx]
         return output, output_labels
     
     def get_times(self,time_idx=[]):
@@ -398,12 +334,7 @@ class DataPack(object):
             time_idx = np.arange(self.Nt)
         time_idx = np.sort(time_idx)
         output = self.times[time_idx]
-        Nt = len(time_idx)
-        output_labels = []
-        j = 0
-        while j < Nt:
-            output_labels.append(self.timestamps[time_idx[j]])
-            j += 1
+        output_labels = self.timestamps[time_idx]
         return output, output_labels
     
     def get_directions(self, dir_idx=[]):
@@ -412,12 +343,7 @@ class DataPack(object):
             dir_idx = np.arange(self.Nd)
         dir_idx = np.sort(dir_idx)
         output = self.directions[dir_idx]
-        Nd = len(dir_idx)
-        output_labels = []
-        k = 0
-        while k < Nd:
-            output_labels.append(self.patch_names[dir_idx[k]])
-            k += 1
+        output_labels = self.patch_names[dir_idx]
         return output, output_labels
 
     def get_freqs(self,freq_idx=[]):
@@ -426,53 +352,49 @@ class DataPack(object):
             freq_idx = np.arange(self.Nf)
         freq_idx = np.sort(freq_idx)
         output = self.freqs[freq_idx]
-        Nf = len(freq_idx)
         return output
     
     def get_antenna_idx(self,ant):
+        '''Get the antenna index of the given label
+        ant : str
+            the label of antenna (case sensitive)
+        return int
+        '''
         assert ant in self.antenna_labels, "{} not a valid label".format(ant)
-        i = 0
-        while i < self.Na:
-            if self.antenna_labels[i] == ant:
-                return i
-            i += 1
+        return np.where(self.antenna_labels == ant)[0][0]
     
     def set_reference_antenna(self,ref_ant):
         if ref_ant is None:
             return
-        ref_ant_idx = None
-        i = 0
-        while i < self.Na:
-            if self.antenna_labels[i] == ref_ant:
-                ref_ant_idx = i
-                break
-            i += 1          
-        assert ref_ant_idx is not None, "{} is not a valid antenna. Choose from {}".format(ref_ant,self.antenna_labels)
+        try:
+            ref_ant_idx = self.get_antenna_idx(ref_ant)
+        except:
+            raise ValueError("{} is not a valid antenna. Choose from {}".format(ref_ant,self.antenna_labels))
         #print("Setting ref_ant: {}".format(ref_ant))
         self.ref_ant = ref_ant
         self.phase -= self.phase[ref_ant_idx,:,:,:]
-        self.prop -= self.prop[ref_ant_idx,:,:,:]
+        #self.prop -= self.prop[ref_ant_idx,:,:,:]
         self.clock -= self.clock[ref_ant_idx,:]
         self.const -= self.const[ref_ant_idx]
 
     def get_center_direction(self):
+        """Get the mean direction in ICRS"""
         ra_mean = np.mean(self.directions.transform_to('icrs').ra)
         dec_mean = np.mean(self.directions.transform_to('icrs').dec)
         phase = ac.SkyCoord(ra_mean,dec_mean,frame='icrs')
         return phase
 
     def find_flagged_antennas(self):
-        '''Determine which antennas are flagged'''
+        '''Determine which antennas are flagged by assuming all zeros means flagged.
+        Ignore the reference antenna if it is set.'''
         assert self.ref_ant is not None, "Set a ref_ant before finding flagged (zeroed) antennas"
-        mask = np.sum(np.sum(self.phase,axis=2),axis=1) == 0
-        i = 0
-        while i < self.Na:
-            if self.antenna_labels[i] == self.ref_ant:
-                ref_ant_idx = i
-                break
-            i += 1   
-        mask[ref_ant_idx] = False
-        return list(self.antenna_labels[mask])
+        mask = np.sum(np.sum(np.sum(self.phase,axis=3),axis=2),axis=1) == 0
+        flagged = []
+        for i,m in enumerate(mask):
+            if m and self.antenna_labels[i] != self.ref_ant:
+                flagged.append(self.antenna_labels[i])
+        return list(self.antenna_labels[flagged])
+
         
     def flag_antennas(self,antenna_labels):
         '''remove data corresponding to the given antenna names if it exists'''
@@ -493,7 +415,7 @@ class DataPack(object):
         self.antenna_labels = self.antenna_labels[mask]
         self.antennas = self.antennas[mask]
         self.phase = self.phase[mask,:,:,:]
-        self.prop = self.prop[mask,:,:,:]
+        self.variance = self.variance[mask,:,:,:]
         self.clock = self.clock[mask,:]
         self.const = self.const[mask]
         self.Na = len(self.antennas)
@@ -515,7 +437,7 @@ class DataPack(object):
         self.patch_names = self.patch_names[mask]
         self.directions = self.directions[mask]
         self.phase = self.phase[:,:,mask,:]
-        self.prop = self.prop[:,:,mask,:]
+        self.variance = self.variance[:,:,mask,:]
         self.Nd = len(self.directions)
 
     def flag_times(self,timestamps):
@@ -535,7 +457,7 @@ class DataPack(object):
         self.timestamps = self.timestamps[mask]
         self.times = self.times[mask]
         self.phase = self.phase[:,mask,:,:]
-        self.prop = self.prop[:,mask,:,:]
+        self.variance = self.variance[:,mask,:,:]
         self.clock = self.clock[:,mask]
         self.Nt = len(self.times)        
     def flag_freqs(self,freq_idx=[]):
@@ -550,7 +472,7 @@ class DataPack(object):
         #some flags may have not existed in data
         self.freqs = self.freqs[mask]
         self.phase = self.phase[:,:,:,mask]
-        self.prop = self.prop[:,:,:,mask]
+        self.variance = self.variance[:,:,:,mask]
         self.Nf = len(self.freqs)        
 
 def generate_example_datapack(Nant = 10, Ntime = 1, Ndir = 10, Nfreqs=4, fov = 4., alt = 90., az=0., time = None, radio_array=None):
@@ -579,7 +501,7 @@ def generate_example_datapack(Nant = 10, Ntime = 1, Ndir = 10, Nfreqs=4, fov = 4
     #print(tec/1e16)
     clock = np.random.normal(size=[Nant,Ntime])*5e-9
     const = np.random.normal(size=[Nant])*2*np.pi
-    prop = np.zeros([Nant,Ntime,Ndir,Nfreqs])
+    #prop = np.zeros([Nant,Ntime,Ndir,Nfreqs])
     phase = np.einsum("i,j,k,l,i->ijkl",np.ones(Nant),np.ones(Ntime),np.ones(Ndir),np.ones(Nfreqs),const)
     variance = np.zeros_like(phase)
     for l in range(Nfreqs):
@@ -592,7 +514,7 @@ def generate_example_datapack(Nant = 10, Ntime = 1, Ndir = 10, Nfreqs=4, fov = 4
     data_dict = {'radio_array':radio_array,'antennas':antennas,'antenna_labels':antenna_labels,
                     'times':times,'timestamps':times.isot,
                     'directions':dirs,'patch_names':patch_names,
-                    'freqs':freqs,'phase':phase,'clock':clock,'const':const,'prop':prop,
+                    'freqs':freqs,'phase':phase,'clock':clock,'const':const,
                     'variance':variance}
     datapack = DataPack(data_dict=data_dict)
     datapack.set_reference_antenna(antenna_labels[0])
@@ -629,13 +551,13 @@ def phase_screen_datapack(N,ant_idx=-1,time_idx=-1,dir_idx=-1,freq_idx=-1,Nant =
     
 #    phase = np.random.normal(size=[Na,Nt,len(dirs)])
     phase = np.zeros([Na,Nt,len(dirs),Nf])
-    prop = np.zeros([Na,Nt,len(dirs),Nf])
+    #prop = np.zeros([Na,Nt,len(dirs),Nf])
     clock = np.zeros([Na,Nt])
     const = np.zeros(Na)
     variance = np.zeros_like(phase)
     data_dict = datapack.get_data_dict()
     data_dict.update({'antennas':antennas,'antenna_labels':antenna_labels,'times':times,'timestamps':timestamps,
-        'directions':dirs,'patch_names':patch_names,'phase':phase,'prop':prop,'clock':clock,'const':const,'freqs':freqs,'variance':variance})
+        'directions':dirs,'patch_names':patch_names,'phase':phase,'clock':clock,'const':const,'freqs':freqs,'variance':variance})
     datapack = DataPack(data_dict=data_dict)
     datapack.set_reference_antenna(antenna_labels[0])
     return datapack
@@ -643,16 +565,4 @@ def phase_screen_datapack(N,ant_idx=-1,time_idx=-1,dir_idx=-1,freq_idx=-1,Nant =
 if __name__ == '__main__':
     datapack = generate_example_datapack(Nant=20,Ntime=40,Ndir=42,Nfreqs=100)
     datapack.save("Test_Save.hdf5")
-    print(datapack)
-    phase = datapack.get_phase(ant_idx=[0,1],time_idx=-1,dir_idx=[0],freq_idx=-1)
-    prop = datapack.get_prop(ant_idx=[0,1],time_idx=-1,dir_idx=[0],freq_idx=-1)
-    phase = np.angle(np.exp(1j*phase))
-    prop = np.angle(np.exp(1j*prop))
-    #print(phase)
-    import pylab as plt
-    plt.plot(datapack.freqs,prop[1,0,0,:])
-    plt.show()
-    plt.imshow(prop[1,:,0,:].T,cmap='rainbow')
-    plt.show()
-
-
+    data = DataPack(filename='Test_Save.hdf5')

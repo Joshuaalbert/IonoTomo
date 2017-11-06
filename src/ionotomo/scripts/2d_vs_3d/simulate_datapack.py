@@ -6,6 +6,8 @@ from ionotomo.inversion.initial_model import *
 import logging as log
 import os
 from time import clock
+from dask.threaded import get
+from functools import partial
 
 def run(output_folder):
     output_folder = os.path.join(os.getcwd(),output_folder)
@@ -34,26 +36,41 @@ def run(output_folder):
     else:
         info = open(info_file,'w')
         info.write("#time_idx timestamp factor corr\n")
-    times,timestamps = datapack_.get_times(time_idx=-1)
-    freqs = datapack_.get_freqs(freq_idx=-1)
-    print(freqs)
-    exit()
+    times,timestamps = datapack_.get_times(time_idx=range(100))
+
+    dsk = {}
    
     Nt = len(times)
     for factor in [2.,4.,8.,16.]:
         for corr in [10.,20.,40.,70.]:
             datapack = datapack_.clone()
             datapack_screen = datapack_screen_.clone()
+            dsk['datapack_{}_{}_{}'.format(factor,corr,-1)] = datapack
+            dsk['datapack_screen_{}_{}_{}'.format(factor,corr,-1)] = datapack_screen
             for j in range(Nt):
                 seed = j+1000
                 log.info("Simulating turbulent ionosphere: factor {} corr {} time {}\n".format(factor,corr,timestamps[j]))
-                ne_tci = create_turbulent_model(datapack,factor=factor,corr=corr,seed=seed,ant_idx = -1, time_idx = [j], dir_idx = -1, zmax = 1000.,spacing=5.,padding=20)
-                datapack = simulate_phase(datapack,ne_tci=ne_tci,num_threads=1,datafolder=None,
-                     ant_idx=-1,time_idx=[j],dir_idx=-1,freq_idx=-1,do_plot_datapack=False,flag_remaining=False)
-                datapack_screen = simulate_phase(datapack_screen,ne_tci=ne_tci,num_threads=1,datafolder=None,
-                     ant_idx=-1,time_idx=[j],dir_idx=-1,freq_idx=-1,do_plot_datapack=False,flag_remaining=False)
+#                ne_tci = create_turbulent_model(datapack,factor=factor,corr=corr,seed=seed,ant_idx = -1, time_idx = [j], dir_idx = -1, zmax = 1000.,spacing=5.,padding=20)
+                dsk['ne_tci_{}_{}_{}'.format(factor,corr,j)] = (partial(create_turbulent_model,factor=factor,corr=corr,seed=seed,ant_idx = -1, time_idx = [j], dir_idx = -1, zmax = 1000.,spacing=5.,padding=20),datapack)
+
+#                datapack = simulate_phase(datapack,ne_tci=ne_tci,num_threads=1,datafolder=None,
+#                     ant_idx=-1,time_idx=[j],dir_idx=-1,freq_idx=-1,do_plot_datapack=False,flag_remaining=False)
+                dsk['datapack_{}_{}_{}'.format(factor,corr,j)] = (lambda datapack, ne_tci : simulate_phase(datapack, ne_tci=ne_tci, num_threads=1, datafolder=None,
+                     ant_idx=-1, time_idx=[j],dir_idx=-1,freq_idx=-1,do_plot_datapack=False,flag_remaining=False), 'datapack_{}_{}_{}'.format(factor,corr,j-1), 'ne_tci_{}_{}_{}'.format(factor,corr,j))
+#                datapack_screen = simulate_phase(datapack_screen,ne_tci=ne_tci,num_threads=1,datafolder=None,
+#                     ant_idx=-1,time_idx=[j],dir_idx=-1,freq_idx=-1,do_plot_datapack=False,flag_remaining=False)
+                dsk['datapack_screen_{}_{}_{}'.format(factor,corr,j)] = (lambda datapack, ne_tci : simulate_phase(datapack,ne_tci=ne_tci,num_threads=1,datafolder=None,
+                     ant_idx=-1,time_idx=[j],dir_idx=-1,freq_idx=-1,do_plot_datapack=False,flag_remaining=False), 'datapack_screen_{}_{}_{}'.format(factor,corr,j-1), 'ne_tci_{}_{}_{}'.format(factor,corr,j))
 
                 info.write("{} {} {} {}\n".format(j, timestamps[j], factor, corr))
+            objectives = ['datapack_{}_{}_{}'.format(factor,corr,Nt-1),'datapack_screen_{}_{}_{}'.format(factor,corr,Nt-1)]
+            from dask.callbacks import Callback
+            class PrintKeys(Callback):
+                def _pretask(self, key, dask, state):
+                    """Print the key of every task as it's started"""
+                    print("Computing: {0}!".format(repr(key)))
+            with PrintKeys():
+                datapack,datapack_screen = get(dsk,objectives,num_workers=None)
             datapack.save(os.path.join(datapack_folder,"datapack_factr{:d}_corr{:d}.hdf5".format(int(factor),int(corr))))
             datapack_screen.save(os.path.join(datapack_folder,"datapack_screen_factr{:d}_corr{:d}.hdf5".format(int(factor),int(corr))))
     info.close()
