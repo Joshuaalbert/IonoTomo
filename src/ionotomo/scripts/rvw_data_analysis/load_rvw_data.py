@@ -141,8 +141,8 @@ def import_data(dd_file, di_file, slow_gain, datapack_file, clobber=False):
     slow_gain_phases = np.mean(f_sg['/sol000/phase000/val'][:,:,:,:,:],axis=4)
     f_sg.close()
 
-    v0 = np.var(phase_unwrapp1d(slow_gain_phases,axis=0),axis=0,keep_dims=True)
-    v1 = np.var(np.transpose(phase_unwrapp1d(np.transpose(slow_gain_phases,axes=[1,0,2,3]),axis=0),axes=[1,0,2,3]),axis=1,keep_dims=True)
+    v0 = np.var(phase_unwrapp1d(slow_gain_phases,axis=0),axis=0,keepdims=True)
+    v1 = np.var(np.transpose(phase_unwrapp1d(np.transpose(slow_gain_phases,axes=[1,0,2,3]),axis=0),axes=[1,0,2,3]),axis=1,keepdims=True)
     std = np.transpose(np.sqrt((v0 + v1)),axes=[2,0,3,1])
 
     uncert = np.zeros([Na,Nt,Nd,Nf])
