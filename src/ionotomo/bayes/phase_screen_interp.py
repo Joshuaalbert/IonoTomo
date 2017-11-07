@@ -19,10 +19,15 @@ class KernelND(object):
         self.hyperparams_bounds = {}
         self.built = False
         for name in _hyperparams:
-            self._add_hyperparam(name,_hyperparams[name],bounds = _hyperparams_bounds.get(name,None))from sympy import lambdify, Matrix, symbols, exp, sqrt, Rational, factorial, sin,pi
+            self._add_hyperparam(name,_hyperparams[name],bounds = _hyperparams_bounds.get(name,None))
 
     def _add_hyperparam(self,name,value,bounds=None):
         self.hyperparams[name] = value
+        if not isinstance(self.hyperparams[name],(list,tuple)):
+            try:
+                self.hyperparams[name] = list(np.array(self.hyperparams[name]))
+            except:
+                self.hyperparams[name] = [self.hyperparams[name]]
         self.fixed[name] = False
         if bounds is None:
             self.hyperparams_bounds[name] = [1e-5,1e5]
@@ -44,11 +49,6 @@ class KernelND(object):
         with tf.variable_scope("{}_{}_hyperparams".format(type(self).__name__, self.__hash__())):
             for name in self.hyperparams.keys():
                 bounds = self.hyperparams_bounds[name]
-                if not isinstance(self.hyperparams[name],(list,tuple)):
-                    try:
-                        self.hyperparams[name] = list(self.hyperparams[name])
-                    except:
-                        self.hyperparams[name] = [self.hyperparams[name]]
                 if len(self.hyperparams[name]) != batch_size:
                     self.hyperparams[name] = [self.hyperparams[name][0]]*batch_size
                 value = self.hyperparams[name]
