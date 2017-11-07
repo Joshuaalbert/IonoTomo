@@ -1,23 +1,15 @@
 import tensorflow as tf
 import numpy as np
-
-
-import numpy as np
-from scipy.linalg import cho_solve
-from ionotomo.utils.cho_solver import cho_back_substitution
-from sympy import lambdify, Matrix, symbols, exp, sqrt, Rational, factorial, sin,pi
-from scipy.optimize import fmin_l_bfgs_b
-from scipy.spatial.distance import (pdist,cdist,squareform)
 import sys
 import logging as log
-
 
 class KernelND(object):
     '''Base class for kernels in ND.
     ndims : int
         the number of dimensions of input
     '''
-    def __init__(self,_hyperparams={},_hyperparams_bounds={},**kwargs):
+    def __init__(self,_hyperparams={},_hyperparams_bounds={},use_initializer=True,**kwargs):
+        self.use_initializer = use_initializer
         assert isinstance(_hyperparams,dict)
         assert isinstance(_hyperparams_bounds,dict)
         _hyperparams.update(kwargs.get("hyperparams",{}))
@@ -27,7 +19,7 @@ class KernelND(object):
         self.hyperparams_bounds = {}
         self.built = False
         for name in _hyperparams:
-            self._add_hyperparam(name,_hyperparams[name],bounds = _hyperparams_bounds.get(name,None))
+            self._add_hyperparam(name,_hyperparams[name],bounds = _hyperparams_bounds.get(name,None))from sympy import lambdify, Matrix, symbols, exp, sqrt, Rational, factorial, sin,pi
 
     def _add_hyperparam(self,name,value,bounds=None):
         self.hyperparams[name] = value
@@ -42,17 +34,14 @@ class KernelND(object):
             return tf.exp(tf.random_uniform(shape,lower,upper,dtype,seed=None))
         return _initializer
 
-    def build(self,batch_size,multi_dataset=False,use_initializer=True,seed=None):
+    def build(self,batch_size,multi_dataset=False,seed=None):
         """Set up the variables (hyperparams)"""
         if self.built:
             return
         self.variables = {}
         self.sync_ops = []
         self.sync_placeholders = {}
-        with tf.variable_scope("{}_hyperparams".format(type(self).__name__)):
-            #self.batch_size = tf.placeholder(tf.int32,shape=(), name='batch_size')
-            self.variables = {}
-            self.variables_ = {}
+        with tf.variable_scope("{}_{}_hyperparams".format(type(self).__name__, self.__hash__())):
             for name in self.hyperparams.keys():
                 bounds = self.hyperparams_bounds[name]
                 if not isinstance(self.hyperparams[name],(list,tuple)):
@@ -60,12 +49,14 @@ class KernelND(object):
                         self.hyperparams[name] = list(self.hyperparams[name])
                     except:
                         self.hyperparams[name] = [self.hyperparams[name]]
+                if len(self.hyperparams[name]) != batch_size:
+                    self.hyperparams[name] = [self.hyperparams[name][0]]*batch_size
                 value = self.hyperparams[name]
                 if multi_dataset:
                     shape=[1,1,1]
                 else:
                     shape=[batch_size,1,1]
-                if use_initializer and not self.fixed[name]:
+                if self.use_initializer and not self.fixed[name]:
                     if bounds[0] > 0 and bounds[1] > 0:
                         self.variables[name] = tf.get_variable(\
                                 name,
@@ -83,26 +74,22 @@ class KernelND(object):
                 else:
                     self.variables[name] = tf.get_variable(\
                             name,
-                            initializer=tf.ones(shape,tf.float64)*tf.constant(value,dtype=tf.float64),
+                            initializer=tf.constant(value,dtype=tf.float64),
                             trainable=not self.fixed[name]) 
-                self.variables_[name] = self.variables[name]
+                self.sync_placeholders[name] = tf.placeholder(tf.float64,shape=[shape[0]],name='sync_{}'.format(name))
+                self.sync_ops.append(tf.assign(self.variables[name],tf.expand_dims(tf.expand_dims(self.sync_placeholders[name],axis=-1),axis=-1)))
                 self.variables[name] = tf.clip_by_value(self.variables[name],bounds[0],bounds[1])
-                #batch_size , 1, 1
-                #self.variables[name] = tf.expand_dims(tf.expand_dims(self.variables[name],axis=-1),axis=-1)
-#                if multi_dataset:
-#                     self.variables[name] = tf.expand_dims(self.variables[name],axis=0)
-
-
-#                self.sync_placeholders[name] = tf.placeholder(tf.float64,shape=[batch_size,1,1],name='sync_{}'.format(name))
-#                self.sync_ops.append(tf.assign(self.variables[name],self.sync_placeholders[name]))
+                
         self.built = True
 
-#    def _sync_variables(self,sess):
-#        """assign self.hyperparams to self.variables"""
-#        feed_dict = {}
-#        for name in self.hyperparams.keys():
-#            feed_dict[self.sync_placeholders[name]] = self.hyperparams[name]
-#        sess.run(self.sync_ops,feed_dict=feed_dict)
+    def _sync_variables(self,sess):
+        """assign self.hyperparams to self.variables"""
+        ops = getattr(self,'sync_ops',None)
+        assert ops is not None,"Must build kernel first"
+        feed_dict = {}
+        for name in self.hyperparams.keys():
+            feed_dict[self.sync_placeholders[name]] = self.hyperparams[name]
+        sess.run(self.sync_ops,feed_dict=feed_dict)
 
     def call(self,X,Y=None,share_x=False,eval_derivative=False):
         """Construct the sub graph defining this kernel.
@@ -182,13 +169,17 @@ class MultiKernel(KernelND):
         super(MultiKernel,self).__init__(**kwargs)
         self.kernels = kernels
 
-    def build(self,batch_size=1,multi_dataset=False,use_initializer=True,**kwargs):
+    def build(self,batch_size=1,multi_dataset=False,**kwargs):
         """Set up the variables (hyperparams)"""
         for K in self.kernels:
             K.build(batch_size=batch_size,
                     multi_dataset=multi_dataset,
                     use_initializer=use_initializer,
                     **kwargs)
+    def _sync_variables(self,sess):
+        """assign self.hyperparams to self.variables"""
+        for K in self.kernels:
+            K._sync_variables(sess)
         
     @property
     def kernels(self):
@@ -323,7 +314,7 @@ class SquaredExponential(KernelND):
             x2 = cdist(X,Y)
         out = self.variables['sigma']**2 * tf.exp(-x2/(2*self.variables['l']**2))
         if eval_derivative:
-            grad = {'sigma': out / self.variables['sigma'],
+            grad = {'sigma': 2. * out / self.variables['sigma'],
                     'l': out * x2/(self.variables['l']**3) }
             return out, grad
         return out
@@ -347,8 +338,8 @@ class SquaredExponentialSep(KernelND):
             x2 = cdist(X[:,:,self.dim:self.dim+1],Y[:,:,self.dim:self.dim+1])
         out = self.variables['sigma']**2 * tf.exp(-x2/(2*self.variables['l']**2))
         if eval_derivative:
-            grad = {'sigma': out / self.variables['sigma'],
-                    'l': out * x2/(self.variables['l']**3) }
+            grad = {'sigma' : 2. * out / self.variables['sigma'],
+                    'l' : out * x2/(self.variables['l']**3) }
             return out, grad
 
         return out
@@ -364,7 +355,15 @@ class GammaExponential(KernelND):
             x2 = pdist(X)
         else:
             x2 = cdist(X,Y)
-        out = self.variables['sigma']**2 * tf.exp(-(x2/(2*self.variables['l']**2)**(self.variables['gamma']/2.)))
+        r = (x2 / self.variables['l'])**(self.variables['gamma'] / 2.)
+        out = self.variables['sigma']**2 * tf.exp(- r / 2.)
+        if eval_derivative:
+            l_ =  r * out
+            grad = {'sigma' : 2. * out / self.variables['sigma'],
+                    'l' : self.variables['gamma'] /(2 * self.variables['l']) * l_, 
+                    'gamma' : - l_ * tf.log(r) / 4.
+                    }
+            return out, grad
         return out
 
 class GammaExponentialSep(KernelND):
@@ -379,7 +378,15 @@ class GammaExponentialSep(KernelND):
             x2 = pdist(X[:,:,self.dim:self.dim+1])
         else:
             x2 = cdist(X[:,:,self.dim:self.dim+1],Y[:,:,self.dim:self.dim+1])
-        out = self.variables['sigma']**2 * tf.exp(-(x2/(2*self.variables['l']**2)**(self.variables['gamma']/2.)))
+        r = (x2 / self.variables['l'])**(self.variables['gamma'] / 2.)
+        out = self.variables['sigma']**2 * tf.exp(- r / 2.)
+        if eval_derivative:
+            l_ =  r * out
+            grad = {'sigma' : 2. * out / self.variables['sigma'],
+                    'l' : self.variables['gamma'] /(2 * self.variables['l']) * l_, 
+                    'gamma' : - l_ * tf.log(r) / 4.
+                    }
+            return out, grad
         return out
 
 class MaternP(KernelND):
@@ -404,7 +411,6 @@ class MaternP(KernelND):
                     (np.sqrt(8.*nu) * r )**(self.p-i))
         out = tf.stack(out,axis=0)
         out = tf.reduce_sum(out,axis=0)
-
         out *= self.variables['sigma']**2 * tf.exp(-np.sqrt(2 * nu) * r) * factorial(self.p) / factorial(2*self.p)
         return out
 
@@ -481,6 +487,9 @@ class Diagonal(KernelND):
             yshape = tf.shape(Y)
             I = tf.eye(num_rows=xshape[1],num_columns=yshape[1],batch_shape=[xshape[0]])
         out = self.variables['sigma']**2 * I
+        if eval_derivative:
+            grad = {'sigma': 2. * self.variables['sigma'] * I}
+            return out, grad
         return out
 
 
@@ -608,13 +617,13 @@ class PhaseScreen(KernelND):
         out = uncorrelated + spatial # temporal + freq
 
         if eval_derivative:
-            grad = {'sigma_D': uncorrelated/self.variables['sigma_D'],
+            grad = {'sigma_D' : 2. * uncorrelated/self.variables['sigma_D'],
                     #'sigma_temporal': temporal/self.variables['sigma_temporal'],
                     #'tau_slow':temporal * x2/(self.variables['tau_slow']**3),
                     #'tau_quick':temporal * x2/(self.variables['tau_quick']**3),
-                    'sigma_spatial':spatial/self.variables['sigma_spatial'],
+                    'sigma_spatial' : 2. * spatial/self.variables['sigma_spatial'],
                     #'l_inertial':self.variables['sigma_spatial']**2 * (1.+r)**(alpha-1) * s_ * ( -2.*r / self.variables['l_inertial']),
-                    'L_outer':spatial*x2/self.variables['L_outer']**3
+                    'L_outer' : spatial*x2/self.variables['L_outer']**3
                     #'alpha':spatial*(tf.log(1+r) - r/(r+1))
                     #'sigma_freq': freq/self.variables['sigma_freq'],
                     #'l_freq':freq*f2/self.variables['l_freq']**3
@@ -670,19 +679,22 @@ def _level1_solve(x,y,sigma_y,xstar,K,use_cholesky,batch_idx_from,batch_idx_to):
             return fstar,cov,log_mar_like
         return tf.cond(use_cholesky,_cho,_no_cho)
 
+
 def _neg_log_mar_like(x,y,sigma_y,K,use_cholesky):
     with tf.variable_scope("neg_log_mar_like"):
         #batch_size
         n = tf.to_double(tf.shape(y)[1])
-        Knn = K.call(x,x)
+        Knn = K.call(x,x,eval_derivative=True)
         # batch_size, n,n
         Kf = Knn + tf.matrix_diag(sigma_y**2,name='sigma_y2_diag')
+        # batch_size, num_hp, n, n
+        
         def _cho(Kf=Kf,y=y):
             # batch_size, n, n
             L = tf.cholesky(Kf,name='L')
-            # batch_size, n
-            alpha = tf.squeeze(tf.cholesky_solve(L, tf.expand_dims(y,-1), name='alpha'),axis=-1)
-            neg_log_mar_like = tf.reduce_sum(y*alpha,1)/2. + tf.reduce_sum(tf.log(tf.matrix_diag_part(L)),axis=1) + n*(np.log(2.*np.pi)/2.)
+            # batch_size, n,1
+            alpha = tf.cholesky_solve(L, tf.expand_dims(y,-1), name='alpha')
+            neg_log_mar_like = tf.reduce_sum(y*tf.squeeze(alpha,axis=2),1)/2. + tf.reduce_sum(tf.log(tf.matrix_diag_part(L)),axis=1) + n*(np.log(2.*np.pi)/2.)
             return neg_log_mar_like
 
         def _no_cho(Kf=Kf,y=y):
@@ -691,28 +703,16 @@ def _neg_log_mar_like(x,y,sigma_y,K,use_cholesky):
             e = tf.where(e > 1e-14, e, 1e-14*tf.ones_like(e))
             Kf = tf.matmul(tf.matmul(v,tf.matrix_diag(e),transpose_a=True),v)
 
-            logdet = tf.reduce_sum(tf.where(e > 1e-8, tf.log(e), tf.zeros_like(e)),axis=-1,name='logdet')
+            logdet = tf.reduce_sum(tf.where(e > 1e-14, tf.log(e), tf.zeros_like(e)),axis=-1,name='logdet')
 
             #batch_size, n, 1
-            alpha = tf.squeeze(tf.matrix_solve(Kf,tf.expand_dims(y,-1),name='solve_alpha'),axis=2)
-            neg_log_mar_like = (tf.reduce_sum(y*alpha,axis=1) + logdet + n*np.log(2.*np.pi))/2.
+            alpha = tf.matrix_solve(Kf,tf.expand_dims(y,-1),name='solve_alpha')
+            neg_log_mar_like = (tf.reduce_sum(y*tf.squeeze(alpha,axis=2),axis=1) + logdet + n*np.log(2.*np.pi))/2.
             return neg_log_mar_like
 #        result = tf.stack([_no_cho(tf.expand_dims(Kf_,0),tf.expand_dims(y_,0)) for Kf_, y_ in zip(tf.unstack(Kf),tf.unstack(y))])
 #        return result
         return tf.cond(use_cholesky,_cho,_no_cho)
 
-def _derivative(K,hp):
-    K_diff = []
-    for k1 in tf.unstack(K,axis=0):#for batch
-        K_diff2 = []
-        for k2 in tf.unstack(k1,axis=0):#for row
-            K_diff3 = []
-            for k3 in tf.unstack(k2,axis=0):# for col
-                K_diff3.append(tf.stack(tf.gradients(k3,hp),axis=0))#num_hp ,1 ,1, 1
-            K_diff2.append(tf.stack(K_diff3,axis=0))#cols, num_hp,1,1,1
-        K_diff.append(tf.stack(K_diff2,axis=0))#rows,cols, num_hp,1,1,1
-    K_diff = tf.stack(K_diff,axis=0)#batch, ...
-    return K_diff
 
 def _neg_log_mar_like_and_grad(x,y,sigma_y,K,use_cholesky):
     with tf.variable_scope("neg_log_mar_like"):
@@ -775,12 +775,12 @@ def _neg_log_mar_like_and_grad(x,y,sigma_y,K,use_cholesky):
 def _level2_optimize(x,y,sigma_y,K,use_cholesky,learning_rate):
     with tf.variable_scope("level2_solve"):
         optimizer = tf.train.AdamOptimizer(learning_rate)
-        neg_log_mar_like, grad =_neg_log_mar_like_and_grad(x,y,sigma_y,K,use_cholesky)
-        grad = [(tf.expand_dims(tf.expand_dims(grad[name],-1),-1),K.get_variables_()[name]) for name in grad] 
-        print(grad)
-        #neg_log_mar_like =_neg_log_mar_like(x,y,sigma_y,K,use_cholesky)
-        #out = optimizer.minimize(tf.reduce_sum(neg_log_mar_like))
-        out = optimizer.apply_gradients(grad)
+#        neg_log_mar_like, grad =_neg_log_mar_like_and_grad(x,y,sigma_y,K,use_cholesky)
+#        grad = [(tf.expand_dims(tf.expand_dims(grad[name],-1),-1),K.get_variables_()[name]) for name in grad] 
+#        print(grad)
+        neg_log_mar_like =_neg_log_mar_like(x,y,sigma_y,K,use_cholesky)
+        out = optimizer.minimize(tf.reduce_sum(neg_log_mar_like))
+        #out = optimizer.apply_gradients(grad)
         return out, neg_log_mar_like
 
 class Pipeline(object):
@@ -837,7 +837,7 @@ class Pipeline(object):
         feed_dict = {self.X : X.astype(float),
                 self.y : y.astype(float),
                 self.sigma_y : sigma_y.astype(float),
-                self.learning_rate : 0.01}
+                self.learning_rate : 0.001}
         
         neg_log_mar_lik_last = np.inf
         patience_count = 0
@@ -862,7 +862,7 @@ class Pipeline(object):
                 neg_log_mar_lik_last = neg_log_mar_lik
                 patience_count = 0
                 feed_dict[self.learning_rate] *= 3.
-                feed_dict[self.learning_rate] = min(0.5,feed_dict[self.learning_rate])
+                feed_dict[self.learning_rate] = min(0.01,feed_dict[self.learning_rate])
 
         hp = self.sess.run(self.K.get_variables())
         self.K.set_hyperparams(hp)
@@ -935,21 +935,20 @@ class Pipeline(object):
 
 def test_build():
     X = np.random.uniform(size=[50,2])
-    xstar = np.linspace(-1,2,100)
+    xstar = np.linspace(0,1,50)
     Xstar,Ystar = np.meshgrid(xstar,xstar)
     Xstar = np.expand_dims(np.array([Xstar.flatten(),Ystar.flatten()]).T,0)
     y = np.sin(X[:,0]*2*np.pi/0.5) *np.cos( X[:,1]*np.pi/0.5*2.) + np.random.normal(size=X.shape[0])*0.1
+    mean_y = np.mean(y)
+    y -= mean_y
     sigma_y = np.ones_like(y)*0.1
 
-    K1 = SquaredExponential()
+    K1 = Periodic(use_initializer=True,hyperparams={'l':5,'sigma':10})
     K1.set_hyperparams_bounds('l',[1e-2, 5])
     K1.set_hyperparams_bounds('sigma',[1e-5,10])
-    K2 = DotProduct()
-    #K3 = RationalQuadratic(hyperparams={'alpha':1./6.})
-    #K3.fix('alpha')
-    K4 = Periodic()
-    K = K1# * K3
-    p = Pipeline(20,None,K,multi_dataset=False,share_x = True)
+    K1.set_hyperparams_bounds('p',[1e-1,10])
+    K = K1
+    p = Pipeline(10,None,K,multi_dataset=False,share_x = True)
     #print(p.level1_predict(X,y,sigma_y,smooth=True))
     print(K)
     win_arg = np.argmin(p.level2_optimize(X,y,sigma_y,patience=20))
@@ -957,12 +956,17 @@ def test_build():
     ystar,cov,lml = p.level1_predict(X,y,sigma_y,Xstar,smooth=False,batch_idx=win_arg)
     var = np.diag(cov[0,:,:])
     import pylab as plt
-    from mpl_toolkits.mplot3d import Axes3D
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-    ax.scatter(X[:,0],X[:,1],y[:],cmap='bone')
-    ax.scatter(Xstar[0,:,0],Xstar[0,:,1],ystar[0,:],cmap='bone')
+#    from mpl_toolkits.mplot3d import Axes3D
+#    fig = plt.figure()
+#    ax = fig.add_subplot(111, projection='3d')
+#    ax.scatter(X[:,0],X[:,1],y[:],cmap='bone')
+#    ax.scatter(Xstar[0,:,0],Xstar[0,:,1],ystar[0,:],cmap='bone')
+#    plt.show()
+    #print(var)    
+    plt.imshow(ystar.reshape([50,50]),extent=(0,1,0,1),origin='lower')
+    plt.scatter(X[:,0],X[:,1],c=y)
+    #plt.scatter(xstar[:,0],xstar[:,1],c=fstar,marker='+')
     plt.show()
-    print(var)    
+
 if __name__=='__main__':
     test_build()
