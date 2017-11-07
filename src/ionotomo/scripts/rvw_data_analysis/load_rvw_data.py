@@ -2,6 +2,7 @@
 from ionotomo.astro.real_data import DataPack
 from ionotomo.astro.radio_array import RadioArray
 import h5py
+from rathings.phase_unwrap import phase_unwrapp1d
 
 import numpy as np
 import astropy.units as au
@@ -23,6 +24,12 @@ else:
 #TECU = 1e16
 tec_conversion = -8.4480e9# rad Hz/tecu
 
+
+def error_map(phase):
+    v0 = np.expand_dims(np.var(phase_unwrapp1d(phase,axis=0),axis=0),0)
+    v1 = np.expand_dims(np.var(phase_unwrapp1d(phase.T,axis=0).T,axis=1),-1)
+    std = np.sqrt((v0 + v1))
+    return std
 
 def import_data(dd_file, di_file, slow_gain, datapack_file, clobber=False):
     """Create a datapack from the direction (de)independent files.
@@ -130,16 +137,17 @@ def import_data(dd_file, di_file, slow_gain, datapack_file, clobber=False):
 
     #uncertainty estimates
     print("getting uncertainty")
-    slow_gain_phases = f_sg['/sol000/phase000/val'][:,:,:,:,0]
+    #30,500,62,42
+    slow_gain_phases = np.mean(f_sg['/sol000/phase000/val'][:,:,:,:,:],axis=4)
     f_sg.close()
-    var_phase = np.var(slow_gain_phases,axis=1)
-    uncert = np.interp(var_phase,
-            np.percentile(var_phase,np.linspace(0,1,100)),
-            np.linspace(0,1,100)**2 * (np.pi - 0.03) + 0.03)
-    uncert_ = np.transpose(np.tile(np.expand_dims(uncert,-1),(1,1,1,Nf)), axes=[1,0,2,3])
+
+    v0 = np.var(phase_unwrapp1d(phase,axis=0),axis=0,keep_dims=True)
+    v1 = np.var(np.transpose(phase_unwrapp1d(np.transpose(phase,axes=[1,0,2,3],axis=0),axes=[1,0,2,3]),axis=1,keep_dims=True)
+    std = np.transpose(np.sqrt((v0 + v1)),axes=[2,0,3,1])
+
     uncert = np.zeros([Na,Nt,Nd,Nf])
     for j in range(uncert_.shape[1]):
-        uncert[:,j*120:min((j+1)*120,Nt),:,:] = uncert_[:,j:j+1,:,:]
+        uncert[:,j*120:min((j+1)*120,Nt),:,:] = std[:,j:j+1,:,:]
 
     #ijkl 
     #phase = phaseoffset_di + tec_di + clock_di + scalarphase_dd + tec_dd
@@ -160,11 +168,11 @@ def import_data(dd_file, di_file, slow_gain, datapack_file, clobber=False):
     return datapack
 
 if __name__=='__main__':
-#    import_data("../../data/NsolutionsDDE_2.5Jy_tecandphasePF_correctedlosoto.hdf5",
-#            "../../data/DI.circ.hdf5",
-#            "../../data/slow_gains.hdf5",
-#            "rvw_datapack_full_phase.hdf5",
-#            clobber=True)
+    import_data("../../data/NsolutionsDDE_2.5Jy_tecandphasePF_correctedlosoto.hdf5",
+            "../../data/DI.circ.hdf5",
+            "../../data/slow_gains.hdf5",
+            "rvw_datapack_full_phase.hdf5",
+            clobber=True)
     from ionotomo.plotting.plot_tools import plot_datapack, animate_datapack
     datapack = DataPack(filename="rvw_datapack_full_phase.hdf5")
     #animate_datapack(datapack,"rvw_datapack_animation_phase", num_threads=1,mode='perantenna',observable='phase')
