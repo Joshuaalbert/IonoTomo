@@ -244,17 +244,17 @@ class KernelND(object):
         bounds = self.hyperparams_bounds
         s = np.zeros(len(bounds))
         for i,b in enumerate(bounds):
-#            if b[0] > 0 and b[1] > 0:
-#                b0 = np.log(b[0])
-#                b1 = np.log(b[1])
-#                s[i] = np.exp(np.random.uniform(low=b0,high=b1))
-#            else:
-            b0,b1 = b
-            if np.isinf(b[0]):
-                b0 = np.sign(b[0])*1e5
-            if np.isinf(b[1]):
-                b1 = np.sign(b[1])*1e5
-            s[i] = np.random.uniform(low=b0,high=b1)
+            if b[0] > 0 and b[1] > 0:
+                b0 = np.log(b[0])
+                b1 = np.log(b[1])
+                s[i] = np.exp(np.random.uniform(low=b0,high=b1))
+            else:
+                b0,b1 = b
+                if np.isinf(b[0]):
+                    b0 = np.sign(b[0])*1e5
+                if np.isinf(b[1]):
+                    b1 = np.sign(b[1])*1e5
+                s[i] = np.random.uniform(low=b0,high=b1)
         return s
 
 class SumKernel(KernelND):
