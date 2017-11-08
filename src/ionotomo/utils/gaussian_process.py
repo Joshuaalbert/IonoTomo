@@ -663,7 +663,7 @@ def level1_solve(x,y,sigma_y,xstar,K):
     Knn = K_matrix[:n,:n]
     Knm = K_matrix[:n,n:n+m]
     Kmm = K_matrix[n:n+m,n:n+m]
-    Kf = Knn + np.diag(sigma_y)
+    Kf = Knn + np.diag(sigma_y**2)
     try:
         L = np.linalg.cholesky(Kf)
         alpha = cho_solve((L,True),y)
@@ -694,7 +694,7 @@ def neg_log_mar_like_and_derivative(hyperparams,x,y,sigma_y,K):
     K.hyperparams = hyperparams
     K_matrix, K_diff = K(x,eval_gradient=True)
     n = x.shape[0]
-    Kf = K_matrix + np.diag(sigma_y)
+    Kf = K_matrix + np.diag(sigma_y**2)
     #sing = is_singular(Kf)
     try:#if pos_def and not sing:
         L = np.linalg.cholesky(Kf)
@@ -738,7 +738,7 @@ def log_mar_like(hyperparams,x,y,sigma_y,K):
     K.hyperparams = hyperparams
     K_matrix = K(x)
     n = x.shape[0]
-    Kf = K_matrix + np.diag(sigma_y)
+    Kf = K_matrix + np.diag(sigma_y**2)
     try:
         L = np.linalg.cholesky(Kf)
         alpha = cho_solve((L,True),y)
