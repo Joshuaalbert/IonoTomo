@@ -23,11 +23,7 @@ class KernelND(object):
 
     def _add_hyperparam(self,name,value,bounds=None):
         self.hyperparams[name] = value
-        if not isinstance(self.hyperparams[name],(list,tuple)):
-            try:
-                self.hyperparams[name] = list(np.array(self.hyperparams[name]))
-            except:
-                self.hyperparams[name] = [self.hyperparams[name]]
+        self.hyperparams[name] = np.atleast_1d(self.hyperparams[name]).astype(float)
         self.fixed[name] = False
         if bounds is None:
             self.hyperparams_bounds[name] = [1e-5,1e5]
@@ -35,27 +31,32 @@ class KernelND(object):
             self.hyperparams_bounds[name] = bounds
 
     def _log_normal_initializer(self,lower,upper,seed=None):
-        def _initializer(shape, dtype, partition_info=None):
-            return tf.exp(tf.random_uniform(shape,lower,upper,dtype,seed=None))
+        def _initializer(shape, dtype, partition_info=None,seed=seed):
+            return tf.exp(tf.random_uniform(shape,lower,upper,dtype,seed=seed))
         return _initializer
 
     def build(self,batch_size,multi_dataset=False,seed=None):
         """Set up the variables (hyperparams)"""
         if self.built:
             return
+        self.batch_size = int(batch_size)
         self.variables = {}
         self.sync_ops = []
         self.sync_placeholders = {}
         with tf.variable_scope("{}_{}_hyperparams".format(type(self).__name__, self.__hash__())):
             for name in self.hyperparams.keys():
-                bounds = self.hyperparams_bounds[name]
-                if len(self.hyperparams[name]) != batch_size:
-                    self.hyperparams[name] = [self.hyperparams[name][0]]*batch_size
-                value = self.hyperparams[name]
                 if multi_dataset:
-                    shape=[1,1,1]
+                    shape=(1,1,1)
                 else:
-                    shape=[batch_size,1,1]
+                    shape=(batch_size,1,1)
+                bounds = self.hyperparams_bounds[name]
+                if len(self.hyperparams[name].shape) == 1:
+                    if self.hyperparams[name].shape[0] != shape[0]:
+                        self.hyperparams[name] = np.array([self.hyperparams[name][0]]*shape[0]).reshape((-1,1,1))
+
+                value = self.hyperparams[name]
+                
+                assert value.shape == shape
                 if self.use_initializer and not self.fixed[name]:
                     if bounds[0] > 0 and bounds[1] > 0:
                         self.variables[name] = tf.get_variable(\
@@ -76,8 +77,10 @@ class KernelND(object):
                             name,
                             initializer=tf.constant(value,dtype=tf.float64),
                             trainable=not self.fixed[name]) 
-                self.sync_placeholders[name] = tf.placeholder(tf.float64,shape=[shape[0]],name='sync_{}'.format(name))
-                self.sync_ops.append(tf.assign(self.variables[name],tf.expand_dims(tf.expand_dims(self.sync_placeholders[name],axis=-1),axis=-1)))
+                self.sync_placeholders[name] = tf.placeholder(tf.float64,shape=shape,name='sync_{}'.format(name))
+                #self.sync_ops.append(tf.assign(self.variables[name],tf.expand_dims(tf.expand_dims(self.sync_placeholders[name],axis=-1),axis=-1)))
+                #self.sync_ops.append(tf.assign(self.variables[name],self.sync_placeholders[name]))
+                self.sync_ops.append(self.variables[name].assign(self.sync_placeholders[name]))
                 self.variables[name] = tf.clip_by_value(self.variables[name],bounds[0],bounds[1])
                 
         self.built = True
@@ -89,8 +92,13 @@ class KernelND(object):
         feed_dict = {}
         for name in self.hyperparams.keys():
             feed_dict[self.sync_placeholders[name]] = self.hyperparams[name]
-        sess.run(self.sync_ops,feed_dict=feed_dict)
+        sess.run(ops,feed_dict=feed_dict)
 
+    def _sync_hyperparams(self,sess):
+        '''Assign variables to hyperparams'''
+        hp = sess.run(self.get_variables())
+        self.set_hyperparams(hp)
+        
     def call(self,X,Y=None,share_x=False,eval_derivative=False):
         """Construct the sub graph defining this kernel.
         Return an output tensor"""
@@ -124,18 +132,16 @@ class KernelND(object):
         assert len(hp) == len(self.hyperparams)
         assert isinstance(hp,dict)
         self.hyperparams.update(hp)
+
     def get_hyperparams(self,idx=None):
         if idx is None:
             idx = slice(self.batch_size)
         hp = {}
         for name in self.hyperparams:
-            hp[name] = self.hyperparams[name][idx]
+            hp[name] = self.hyperparams[name][idx,:,:]
         return hp
     def get_variables(self):
         return self.variables
-
-    def get_variables_(self):
-        return self.variables_
     def __add__(self,K):
         '''Add another Kernel or SumKernel. Creates a SumKernel object'''
         assert isinstance(K,KernelND), "Can only add kernels to kernels"
@@ -174,13 +180,15 @@ class MultiKernel(KernelND):
         for K in self.kernels:
             K.build(batch_size=batch_size,
                     multi_dataset=multi_dataset,
-                    use_initializer=use_initializer,
                     **kwargs)
     def _sync_variables(self,sess):
         """assign self.hyperparams to self.variables"""
         for K in self.kernels:
             K._sync_variables(sess)
-        
+    def _sync_hyperparams(self,sess):
+        '''Assign variables to hyperparams'''
+        for K in self.kernels:
+            K._sync_hyperparams(sess)
     @property
     def kernels(self):
         return self._kernels
@@ -209,12 +217,7 @@ class MultiKernel(KernelND):
         for K in self.kernels:
             var.append(K.get_variables())
         return var
-    def get_variables_(self):
-        var = []
-        for K in self.kernels:
-            var.append(K.get_variables_())
-        return var
-
+    
         
 class SumKernel(MultiKernel):
     def __init__(self,kernels,**kwargs):
@@ -355,7 +358,7 @@ class GammaExponential(KernelND):
             x2 = pdist(X)
         else:
             x2 = cdist(X,Y)
-        r = (x2 / self.variables['l'])**(self.variables['gamma'] / 2.)
+        r = (tf.abs(x2) / self.variables['l'])**(self.variables['gamma'] / 2.)
         out = self.variables['sigma']**2 * tf.exp(- r / 2.)
         if eval_derivative:
             l_ =  r * out
@@ -453,8 +456,8 @@ class Periodic(KernelND):
             x2 = pdist(X)
         else:
             x2 = cdist(X,Y)
-        r = tf.sqrt(x2)/self.variables['p']
-        out = self.variables['sigma']**2 * tf.exp(-2*(tf.sin(np.pi * r) / self.variables['l'])**2)
+        r = tf.sqrt(tf.abs(x2))/(self.variables['p'] + 1e-15)
+        out = self.variables['sigma']**2 * tf.exp(-2*tf.sin(np.pi * r)**2 / (1e-15 + self.variables['l'])**2)
         return out
 
 class PeriodicSep(KernelND):
@@ -469,7 +472,7 @@ class PeriodicSep(KernelND):
             x2 = pdist(X[:,:,self.dim:self.dim+1])
         else:
             x2 = cdist(X[:,:,self.dim:self.dim+1],Y[:,:,self.dim:self.dim+1])
-        r = tf.sqrt(x2)/self.variables['p']
+        r = tf.sqrt(tf.abs(x2))/self.variables['p']
         out = self.variables['sigma']**2 * tf.exp(-2*(tf.sin(np.pi * r) / self.variables['l'])**2)
         return out
 
@@ -482,10 +485,11 @@ class Diagonal(KernelND):
 #            X = tf.expand_dims(X,0)
         if Y is None:
             xshape = tf.shape(X)
-            I = tf.eye(xshape[1],batch_shape=[xshape[0]])
+            I = tf.eye(xshape[1],batch_shape=[xshape[0]],dtype=tf.float64)
         else:
+            xshape = tf.shape(X)
             yshape = tf.shape(Y)
-            I = tf.eye(num_rows=xshape[1],num_columns=yshape[1],batch_shape=[xshape[0]])
+            I = tf.eye(num_rows=xshape[1],num_columns=yshape[1],batch_shape=[xshape[0]],dtype=tf.float64)
         out = self.variables['sigma']**2 * I
         if eval_derivative:
             grad = {'sigma': 2. * self.variables['sigma'] * I}
@@ -684,9 +688,11 @@ def _neg_log_mar_like(x,y,sigma_y,K,use_cholesky):
     with tf.variable_scope("neg_log_mar_like"):
         #batch_size
         n = tf.to_double(tf.shape(y)[1])
-        Knn = K.call(x,x,eval_derivative=True)
+        Knn = K.call(x,x,eval_derivative=False)
+
         # batch_size, n,n
         Kf = Knn + tf.matrix_diag(sigma_y**2,name='sigma_y2_diag')
+        Kf = tf.Print(Kf,[Kf])
         # batch_size, num_hp, n, n
         
         def _cho(Kf=Kf,y=y):
@@ -787,12 +793,11 @@ class Pipeline(object):
     """This class defines the problems that are to be solved using Gaussian processes.
     In general many problems can be solved at once using batching so long 
     as the dimensions are the same."""
-    def __init__(self,batch_size,num_points,K,multi_dataset=False,share_x=False):
+    def __init__(self,batch_size,K,multi_dataset=False,share_x=False):
         assert isinstance(K,KernelND)
         self.K = K
         self.batch_size = int(batch_size)
-        self.num_points = num_points
-        self.K.build(batch_size=self.batch_size,multi_dataset=multi_dataset,use_initializer=True)
+        self.K.build(batch_size=self.batch_size,multi_dataset=multi_dataset)
         
         self.multi_dataset = multi_dataset
         self.share_x = share_x
@@ -802,9 +807,9 @@ class Pipeline(object):
         
     def _build(self):
         with tf.variable_scope("pipeline"):
-            self.X = tf.placeholder(tf.float64,shape=[None,self.num_points,None], name='X')
-            self.y = tf.placeholder(tf.float64,shape=[None,self.num_points], name='y')
-            self.sigma_y = tf.placeholder(tf.float64,shape=[None,self.num_points], name='sigma_y')
+            self.X = tf.placeholder(tf.float64,shape=None, name='X')
+            self.y = tf.placeholder(tf.float64,shape=None, name='y')
+            self.sigma_y = tf.placeholder(tf.float64,shape=None, name='sigma_y')
             self.Xstar = tf.placeholder(tf.float64,shape=[None,None,None], name='Xstar')
             self.use_cholesky = tf.placeholder(tf.bool,shape=(),name='use_cholesky')
             self.batch_idx_from = tf.placeholder(tf.int32,shape=(),name='batch_idx_from')
@@ -817,59 +822,6 @@ class Pipeline(object):
             self.level2_op, self.neg_log_mar_like = _level2_optimize(self.X,self.y,self.sigma_y,self.K,self.use_cholesky,self.learning_rate)
         
         
-    def level2_optimize(self,X,y,sigma_y,delta=0.001,patience=20,epochs=1000):
-        if self.share_x:
-            if len(X.shape) == 2:
-                X = np.expand_dims(X,0)
-            if len(y.shape) == 1:
-                y = np.expand_dims(y,0)
-                y = np.tile(y,(self.batch_size,1))
-            if len(sigma_y.shape) == 1:
-                sigma_y = np.expand_dims(sigma_y,0)
-                sigma_y = np.tile(sigma_y,(self.batch_size,1))
-        else:
-            assert len(X.shape) == 3
-            assert len(y.shape) == 2
-            assert y.shape[0] == X.shape[0]
-        assert y.shape[1] == X.shape[1]
-        assert y.shape == sigma_y.shape
-
-        feed_dict = {self.X : X.astype(float),
-                self.y : y.astype(float),
-                self.sigma_y : sigma_y.astype(float),
-                self.learning_rate : 0.001}
-        
-        neg_log_mar_lik_last = np.inf
-        patience_count = 0
-        epoch_count = 0
-        while epoch_count < epochs:
-            
-            epoch_count += 1
-            try:
-                feed_dict[self.use_cholesky] = True
-                _, neg_log_mar_lik = self.sess.run([self.level2_op,self.neg_log_mar_like],feed_dict=feed_dict)
-            except:
-                feed_dict[self.use_cholesky] = False
-                _, neg_log_mar_lik = self.sess.run([self.level2_op,self.neg_log_mar_like],feed_dict=feed_dict)
-            print('Hamiltonian: {}'.format(neg_log_mar_lik))
-            if (np.sum(neg_log_mar_lik)/np.sum(neg_log_mar_lik_last) - 1) > -delta:
-                patience_count += 1
-                feed_dict[self.learning_rate] /= 3.
-                feed_dict[self.learning_rate] = max(0.00001,feed_dict[self.learning_rate])
-                if patience_count > patience:
-                    break
-            else:
-                neg_log_mar_lik_last = neg_log_mar_lik
-                patience_count = 0
-                feed_dict[self.learning_rate] *= 3.
-                feed_dict[self.learning_rate] = min(0.01,feed_dict[self.learning_rate])
-
-        hp = self.sess.run(self.K.get_variables())
-        self.K.set_hyperparams(hp)
-        print(self.K)
-
-        return neg_log_mar_lik
-
     def level1_predict(self,X,y,sigma_y, Xstar=None, smooth=False,batch_idx=None):
         '''
         Predictive distribution.
@@ -932,9 +884,90 @@ class Pipeline(object):
 
         
         return ystar,cov,lml
+    
+    def level2_optimize(self,X,y,sigma_y,delta=0.001,patience=20,epochs=1000):
+        if self.share_x:
+            if len(X.shape) == 2:
+                X = np.expand_dims(X,0)
+            if len(y.shape) == 1:
+                y = np.expand_dims(y,0)
+                y = np.tile(y,(self.batch_size,1))
+            if len(sigma_y.shape) == 1:
+                sigma_y = np.expand_dims(sigma_y,0)
+                sigma_y = np.tile(sigma_y,(self.batch_size,1))
+        else:
+            assert len(X.shape) == 3
+            assert len(y.shape) == 2
+            assert y.shape[0] == X.shape[0]
+        assert y.shape[1] == X.shape[1]
+        assert y.shape == sigma_y.shape
 
-def test_build():
-    X = np.random.uniform(size=[50,2])
+        feed_dict = {self.X : X.astype(float),
+                self.y : y.astype(float),
+                self.sigma_y : sigma_y.astype(float),
+                self.learning_rate : 0.001}
+        
+        neg_log_mar_lik_last = np.inf
+        patience_count = 0
+        epoch_count = 0
+        while epoch_count < epochs:
+            
+            epoch_count += 1
+            try:
+                feed_dict[self.use_cholesky] = True
+                _, neg_log_mar_lik = self.sess.run([self.level2_op,self.neg_log_mar_like],feed_dict=feed_dict)
+            except:
+                feed_dict[self.use_cholesky] = False
+                _, neg_log_mar_lik = self.sess.run([self.level2_op,self.neg_log_mar_like],feed_dict=feed_dict)
+            print('Hamiltonian: {}'.format(neg_log_mar_lik))
+            if np.all((neg_log_mar_lik/neg_log_mar_lik_last - 1) > -delta):
+                patience_count += 1
+                #feed_dict[self.learning_rate] /= 3.
+                feed_dict[self.learning_rate] = max(0.00001,feed_dict[self.learning_rate])
+                if patience_count > patience:
+                    break
+            else:
+                neg_log_mar_lik_last = neg_log_mar_lik
+                patience_count = 0
+                #feed_dict[self.learning_rate] *= 3.
+                feed_dict[self.learning_rate] = min(0.1,feed_dict[self.learning_rate])
+
+        hp = self.sess.run(self.K.get_variables())
+        self.K.set_hyperparams(hp)
+        print(self.K)
+
+        return neg_log_mar_lik
+
+
+
+def test_kernels():
+    K1 = Periodic(use_initializer=False,hyperparams={'l':5,'sigma':10})
+    K1.set_hyperparams_bounds('l',[1e-2, 6])
+    K1.set_hyperparams_bounds('sigma',[1e-5,10])
+    K1.set_hyperparams_bounds('p',[1e-1,10])
+    K2 = Diagonal() + Diagonal()
+    K3 = SquaredExponential()
+    K = K1 + K2 + K3
+    K.build(4,seed=1234)
+    sess = tf.Session()
+    sess.run(tf.global_variables_initializer())
+    K._sync_hyperparams(sess)
+    hp2 = K1.get_hyperparams()
+    assert np.all(hp2['l'] == 5)
+    hp2['l'] += 1
+    K1.set_hyperparams(hp2)
+    hp2_ = K1.get_hyperparams()
+    assert np.all(hp2_['l'] == 6.)
+    K._sync_variables(sess)
+    K._sync_hyperparams(sess)
+    hp3 = K1.get_hyperparams()
+    assert np.all(hp3['l']==6.)
+
+
+
+def test_level2():
+    N = 250
+    X = np.random.uniform(size=[N,2])
     xstar = np.linspace(0,1,50)
     Xstar,Ystar = np.meshgrid(xstar,xstar)
     Xstar = np.expand_dims(np.array([Xstar.flatten(),Ystar.flatten()]).T,0)
@@ -943,13 +976,14 @@ def test_build():
     y -= mean_y
     sigma_y = np.ones_like(y)*0.1
 
-    K1 = Periodic(use_initializer=True,hyperparams={'l':5,'sigma':10})
-    K1.set_hyperparams_bounds('l',[1e-2, 5])
-    K1.set_hyperparams_bounds('sigma',[1e-5,10])
-    K1.set_hyperparams_bounds('p',[1e-1,10])
-    K = K1
-    p = Pipeline(10,None,K,multi_dataset=False,share_x = True)
-    #print(p.level1_predict(X,y,sigma_y,smooth=True))
+    #K1 = SquaredExponential(use_initializer=False,hyperparams={'l':0.5})
+    K1 = Periodic(use_initializer=True,hyperparams={'l':0.5,'sigma':8})
+    K1.set_hyperparams_bounds('l',[1e-2, 4])
+    K1.set_hyperparams_bounds('sigma',[1e-5,9])
+    K1.set_hyperparams_bounds('p',[1e-1,100])
+    K = SquaredExponential(use_initializer=False,hyperparams={'l':0.05}) + Diagonal(use_initializer=False,hyperparams={'sigma':1})
+    p = Pipeline(2,K,multi_dataset=False,share_x = True)
+    print(p.level1_predict(X,y,sigma_y,smooth=True))
     print(K)
     win_arg = np.argmin(p.level2_optimize(X,y,sigma_y,patience=20))
     print(K)
@@ -969,4 +1003,5 @@ def test_build():
     plt.show()
 
 if __name__=='__main__':
-    test_build()
+    test_kernels()
+    test_level2()
