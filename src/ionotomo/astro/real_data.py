@@ -508,7 +508,7 @@ def generate_example_datapack(Nant = 10, Ntime = 1, Ndir = 10, Nfreqs=4, fov = 4
         a_ = 2*np.pi * freqs[l]
         dg = a_ * np.einsum("ij,k->ijk",clock,np.ones(Ndir))
         dg -= 8.4480e-7/freqs[l]*tec
-        prop[:,:,:,l] += 8.4480e-7/freqs[l]*tec
+        #prop[:,:,:,l] += 8.4480e-7/freqs[l]*tec
         phase[:,:,:,l] += dg
     phase += np.random.normal(size=phase.shape)*5*np.pi/180.
     data_dict = {'radio_array':radio_array,'antennas':antennas,'antenna_labels':antenna_labels,
