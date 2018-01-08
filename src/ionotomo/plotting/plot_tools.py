@@ -191,7 +191,7 @@ def animate_tci_slices(TCI,output_folder,num_seconds=10.):
     make_animation(output_folder,prefix='fig',fps=int(TCI.nz/float(num_seconds)))        
 
   
-def plot_datapack(datapack,ant_idx=-1,time_idx=[0], dir_idx=-1,freq_idx=-1,figname=None,vmin=None,vmax=None,mode='perantenna',observable='phase',phase_wrap=True):
+def plot_datapack(datapack,ant_idx=-1,time_idx=[0], dir_idx=-1,freq_idx=-1,figname=None,vmin=None,vmax=None,mode='perantenna',observable='phase',phase_wrap=True,res_N = 25):
     '''Plot phase at central frequency'''
     assert datapack.ref_ant is not None, "set DataPack ref_ant first"
     if len(time_idx) == 1 and figname is not None:
@@ -219,8 +219,8 @@ def plot_datapack(datapack,ant_idx=-1,time_idx=[0], dir_idx=-1,freq_idx=-1,figna
         vmax = np.pi
         cmap = phase_cmap
     else:
-        vmin = np.percentile(obs.flatten(), 5)
-        vmax = np.percentile(obs.flatten(), 95)
+        vmin = vmin or np.percentile(obs.flatten(), 5)
+        vmax = vmax or np.percentile(obs.flatten(), 95)
         cmap = plt.cm.bone
 
 
@@ -252,7 +252,7 @@ def plot_datapack(datapack,ant_idx=-1,time_idx=[0], dir_idx=-1,freq_idx=-1,figna
             #use direction average as phase tracking direction
             
             
-            N = 25
+            N = res_N
             
             
             U,V = np.meshgrid(np.linspace(np.min(dirs_uvw.u.value*factor300),
@@ -291,7 +291,7 @@ def plot_datapack(datapack,ant_idx=-1,time_idx=[0], dir_idx=-1,freq_idx=-1,figna
             vmax = np.pi
             vmin = -np.pi
 
-            N = 25
+            N = res_N
             
             U,V = np.meshgrid(np.linspace(np.min(ants_uvw.u.to(au.km).value),
                 np.max(ants_uvw.u.to(au.km).value),N),

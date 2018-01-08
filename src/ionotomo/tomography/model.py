@@ -8,28 +8,31 @@ import astropy.coordinates as ac
 import astropy.units as au
 import astropy.time as at
 
-def calc_rays_and_initial_model(antennas,directions,times,zmax=1000.,res_n=201,spacing=10.):
+def calc_rays_and_initial_model(antennas,directions,times,zmax=1000.,res_n=201,spacing=10.,phase_center=None,array_center=None):
     """Create straight line rays from given antennas, directions and times.
     antennas : astropy.coordinates.ITRS convertible
         The antenna locations
     """
     res_n = (res_n >> 1)*2 + 1
     fixtime = times[0]
-    phase_center = ac.SkyCoord(np.mean(directions.ra.deg)*au.deg,
-            np.mean(directions.dec.deg)*au.deg,frame='icrs')
-    array_center = ac.SkyCoord(np.mean(antennas.x.to(au.m).value)*au.m,
-                               np.mean(antennas.y.to(au.m).value)*au.m,
-                               np.mean(antennas.z.to(au.m).value)*au.m,frame='itrs')
+    if phase_center is None:
+        phase_center = ac.SkyCoord(np.mean(directions.ra.deg)*au.deg,
+                np.mean(directions.dec.deg)*au.deg,frame='icrs')
+    if array_center is None:
+        array_center = ac.SkyCoord(np.mean(antennas.x.to(au.m).value)*au.m,
+                           np.mean(antennas.y.to(au.m).value)*au.m,
+                           np.mean(antennas.z.to(au.m).value)*au.m,frame='itrs')
     rays = np.zeros((len(antennas),len(times),len(directions),3,res_n),dtype=float)
-    factor = np.linspace(0,zmax,res_n)
+    factor = np.linspace(0,1,res_n)[None,None,:]
     for j in range(len(times)):
         uvw = Pointing(location = array_center.earth_location,obstime = times[j],
                 fixtime=fixtime, phase = phase_center)
         ants_uvw = antennas.transform_to(uvw).cartesian.xyz.to(au.km).value.T
         dirs_uvw = directions.transform_to(uvw).cartesian.xyz.value.T
-        rays[:,j,:,0,:] = ants_uvw[:,0][:,None,None] + dirs_uvw[:,0][None,:,None]*factor[None,None,:]
-        rays[:,j,:,1,:] = ants_uvw[:,1][:,None,None] + dirs_uvw[:,1][None,:,None]*factor[None,None,:]
-        rays[:,j,:,2,:] = ants_uvw[:,2][:,None,None] + dirs_uvw[:,2][None,:,None]*factor[None,None,:]
+        t = factor*((zmax  - ants_uvw[:,2,None,None])/dirs_uvw[None,:,2,None])
+        rays[:,j,:,0,:] = ants_uvw[:,0][:,None,None] + dirs_uvw[None,:,0,None]*t
+        rays[:,j,:,1,:] = ants_uvw[:,1][:,None,None] + dirs_uvw[None,:,1,None]*t
+        rays[:,j,:,2,:] = ants_uvw[:,2][:,None,None] + dirs_uvw[None,:,2,None]*t
     xmax = np.max(rays[:,:,:,0,:])
     ymax = np.max(rays[:,:,:,1,:])
     zmax = np.max(rays[:,:,:,2,:])

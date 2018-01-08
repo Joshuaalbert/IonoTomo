@@ -27,16 +27,17 @@ def test_enu():
     c2 = enucoords.transform_to('itrs').transform_to(enu)
     assert np.all(np.isclose(enucoords.cartesian.xyz.value, c2.cartesian.xyz.value))
 
+def compVectors(a,b):
+        a = a.cartesian.xyz.value
+        #a /= np.linalg.norm(a)
+        b = b.cartesian.xyz.value
+        #b /= np.linalg.norm(b)
+        #h = np.linalg.norm(a-b)
+        return np.all(np.isclose(a,b))
+        #return h < 1e-6
 
 
 def test_uvw():
-    def compVectors(a,b):
-        a = a.cartesian.xyz.value
-        a /= np.linalg.norm(a)
-        b = b.cartesian.xyz.value
-        b /= np.linalg.norm(b)
-        h = np.linalg.norm(a-b)
-        return h < 1e-8
     # with X - East, Z - NCP and Y - Down
     time = at.Time("2017-01-26T17:07:00.000",format='isot',scale='utc')
     loc = ac.EarthLocation(lon=10*u.deg,lat=10*u.deg,height=0*u.km)
@@ -45,7 +46,7 @@ def test_uvw():
     z = ac.SkyCoord(0,np.cos(loc.geodetic[1].rad),np.sin(loc.geodetic[1].rad),frame=enu)
     #ncp = ac.SkyCoord(0*u.one,0*u.one,1*u.one,frame='itrs').transform_to(enu)
     y = ac.SkyCoord(0,np.sin(loc.geodetic[1].rad),-np.cos(loc.geodetic[1].rad),frame=enu)
-    lst = ac.AltAz(alt=90*u.deg,az=0*u.deg,location=loc,obstime=time).transform_to(ac.ICRS).ra
+    lst = time.sidereal_time('mean',10*u.deg)# ac.AltAz(alt=90*u.deg,az=0*u.deg,location=loc,obstime=time).transform_to(ac.ICRS).ra
     #ha = lst - ra
     print("a) when ha=0,dec=90  uvw aligns with xyz")
     ha = 0*u.deg
@@ -90,13 +91,6 @@ def test_uvw():
     #print("passed d")
 
 def test_pointing():
-    def compVectors(a,b):
-        a = a.cartesian.xyz.value
-        a /= np.linalg.norm(a)
-        b = b.cartesian.xyz.value
-        b /= np.linalg.norm(b)
-        h = np.linalg.norm(a-b)
-        return h < 1e-8
     #print("Test uv conventions when fix and obs time are equal")
     # with X - East, Z - NCP and Y - Down
     time = at.Time("2017-01-26T17:07:00.000",format='isot',scale='utc')
@@ -106,7 +100,7 @@ def test_pointing():
     z = ac.SkyCoord(0,np.cos(loc.geodetic[1].rad),np.sin(loc.geodetic[1].rad),frame=enu)
     #ncp = ac.SkyCoord(0*u.one,0*u.one,1*u.one,frame='itrs').transform_to(enu)
     y = ac.SkyCoord(0,np.sin(loc.geodetic[1].rad),-np.cos(loc.geodetic[1].rad),frame=enu)
-    lst = ac.AltAz(alt=90*u.deg,az=0*u.deg,location=loc,obstime=time).transform_to(ac.ICRS).ra
+    lst = time.sidereal_time('mean',10*u.deg)#ac.AltAz(alt=90*u.deg,az=0*u.deg,location=loc,obstime=time).transform_to(ac.ICRS).ra
     #ha = lst - ra
     #print("a) when ha=0,dec=90  pointing aligns with xyz")
     ha = 0*u.deg
@@ -150,10 +144,10 @@ def test_pointing():
     assert compVectors(W,east),"fail test d, w != east"
     #print("passed d")
     #print("More tests")
-    fixtime = at.Time("2017-01-26T07:00:00.000",format='isot',scale='tai')
-    time = at.Time("2017-01-26T13:00:00.000",format='isot',scale='tai')
+    fixtime = at.Time("2005-01-26T07:00:00.000",format='isot',scale='tai')
+    time = at.Time("2005-01-26T13:00:00.000",format='isot',scale='tai')
     loc = ac.EarthLocation(lon=0*u.deg,lat=0*u.deg,height=0*u.km)
-    lst = ac.AltAz(alt=90*u.deg,az=0*u.deg,location=loc,obstime=fixtime).transform_to(ac.ICRS).ra
+    lst = time.sidereal_time('mean',0*u.deg)#ac.AltAz(alt=90*u.deg,az=0*u.deg,location=loc,obstime=fixtime).transform_to(ac.ICRS).ra
     #ha = lst - ra
     ha = 0*u.deg
     ra = lst - ha

@@ -31,7 +31,7 @@ def error_map(phase):
     std = np.sqrt((v0 + v1))
     return std
 
-def import_data(dd_file, di_file, slow_gain, datapack_file, clobber=False):
+def import_data(dd_file, di_file, slow_gain, datapack_file, clobber=False,dd_only = False):
     """Create a datapack from the direction (de)independent files.
     dd_file : str
         path to dd solutions made by NDPPP
@@ -99,27 +99,26 @@ def import_data(dd_file, di_file, slow_gain, datapack_file, clobber=False):
                 #di part
 
     print("getting phases")
-    #phaseoffset_di
-    phase = np.einsum('ij,l,k->ijkl',
-            f_di['/sol000/phasesoffset000/val'][0,0,:,0,:],
-            np.ones(Nf,dtype=float),
-            np.ones(Nd,dtype=float))
+    if not dd_only:
+        #phaseoffset_di
+        phase += np.einsum('ij,l,k->ijkl',
+                f_di['/sol000/phasesoffset000/val'][0,0,:,0,:],
+                np.ones(Nf,dtype=float),
+                np.ones(Nd,dtype=float))
 
-    #tec_di
-    phase += tec_conversion*np.einsum('ji,k,l->ijkl',
-            f_di['/sol000/tec000/val'][:,:],
-            np.ones(Nd,dtype=float),
-            freqs_inv)
+        #tec_di
+        phase += tec_conversion*np.einsum('ji,k,l->ijkl',
+                f_di['/sol000/tec000/val'][:,:],
+                np.ones(Nd,dtype=float),
+                freqs_inv)
 
-    #clock_di 
-    phase += (2*np.pi)*np.einsum('ji,k,l->ijkl',
-            f_di['/sol000/clock000/val'][:,:], 
-            np.ones(Nd,dtype=float), 
-            freqs)
+        #clock_di 
+        phase += (2*np.pi)*np.einsum('ji,k,l->ijkl',
+                f_di['/sol000/clock000/val'][:,:], 
+                np.ones(Nd,dtype=float), 
+                freqs)
 
     clock = f_di['/sol000/clock000/val'][:,:].T#seconds
-
-    
 
     #dd part
     #scalarphase_dd 
@@ -131,7 +130,7 @@ def import_data(dd_file, di_file, slow_gain, datapack_file, clobber=False):
             f_dd['/sol000/tec000/val'][:,:,:,0], 
             freqs_inv)
     #Na
-    const = np.mean(np.mean(np.expand_dims(f_di['/sol000/phasesoffset000/val'][0,0,:,0,:], -1) + np.transpose(f_dd['/sol000/scalarphase000/val'][:,:,:,0],[1,0,2]),axis=2),axis=1)#radians
+    #const = np.mean(np.mean(np.expand_dims(f_di['/sol000/phasesoffset000/val'][0,0,:,0,:], -1) + np.transpose(f_dd['/sol000/scalarphase000/val'][:,:,:,0],[1,0,2]),axis=2),axis=1)#radians
     f_dd.close()
     f_di.close()
 
@@ -139,6 +138,8 @@ def import_data(dd_file, di_file, slow_gain, datapack_file, clobber=False):
     print("getting uncertainty")
     #30,500,62,42
     slow_gain_phases = np.mean(f_sg['/sol000/phase000/val'][:,:,:,:,:],axis=4)
+    t_sg = (np.arange(slow_gain_phases.shape[0]) + 0.5)*(times[-1].gps - times[0].gps) + times[0].gps
+    t_interp = times.gps
     f_sg.close()
 
     v0 = np.var(phase_unwrapp1d(slow_gain_phases,axis=0),axis=0,keepdims=True)
@@ -146,8 +147,16 @@ def import_data(dd_file, di_file, slow_gain, datapack_file, clobber=False):
     std = np.transpose(np.sqrt((v0 + v1)),axes=[2,0,3,1])
 
     uncert = np.zeros([Na,Nt,Nd,Nf])
-    for j in range(std.shape[1]):
-        uncert[:,j*120:min((j+1)*120,Nt),:,:] = std[:,j:j+1,:,:]
+    i = np.searchsorted(t_sg,t_interp) - 1
+    start = i
+    end = i + 1
+    uncert = (std[:,start,:,:] * ((t_interp - t_sg[start])[None,:,None,None]) + std[:,end,:,:] * ((t_sg[end] - t_interp)[None,:,None,None]))/((t_sg[end] - t_sg[start])[None,:,None,None])
+#    for j in range(Nt):
+#        start = i[j]
+#        end = i[j] + 1
+#        uncert[:,j,:,:] = (std[:,start,:,:] * (t_interp[j] - t_sg[start]) + std[:,end,:,:] * (t_sg[end] - t_interp[j]))/(t_sg[end] - t_sg[start])
+#        uncert[:,j*120:min((j+1)*120,Nt),:,:] = std[:,j:j+1,:,:]
+
 
     #ijkl 
     #phase = phaseoffset_di + tec_di + clock_di + scalarphase_dd + tec_dd
@@ -156,7 +165,7 @@ def import_data(dd_file, di_file, slow_gain, datapack_file, clobber=False):
     variance = uncert**2
     #prop = tec_dd#+ scalarphase_dd#tec_di + tec_dd#radians
     
-    data_dict.update({'phase':phase, 'clock':clock, 'const':const, 'variance':variance})
+    data_dict.update({'phase':phase 'variance':variance})
     print("creating datapack")
     datapack = DataPack(data_dict)
     datapack.set_reference_antenna(antenna_labels[0])

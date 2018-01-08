@@ -35,9 +35,9 @@ def determine_inversion_domain(spacing,antennas, directions, pointing, zmax, pad
     log.info("Found domain u in {}..{}, v in {}..{}, w in {}..{}".format(umin,umax,vmin,vmax,wmin,wmax))
     return uvec,vvec,wvec
 
-def turbulent_perturbation(tci,sigma = 3.,corr = 20., nu = 5./2.):    
-    cov_obj = IonosphereSimulation(tci,sigma,corr,nu)
-    B = cov_obj.realization()
+def turbulent_perturbation(tci,sigma = 3.,corr = 20.,seed=None):    
+    cov_obj = IonosphereSimulation(tci.xvec, tci.yvec,tci.zvec, sigma,corr,type='m52')
+    B = cov_obj.realization(seed=seed)
     return B
 
 def create_initial_model(datapack,ant_idx = -1, time_idx = -1, dir_idx = -1, zmax = 1000.,spacing=5.,padding=20):
@@ -80,7 +80,7 @@ def create_turbulent_model(datapack,factor=2.,corr=20.,seed=None, **initial_mode
     ne_tci = create_initial_model(datapack,**initial_model_kwargs)
     #exp(-dm) = 0.5 -> dm = -log(1/2)= log(2)
     #exp(dm) = 2 -> dm = log(2)
-    dm = turbulent_perturbation(ne_tci,sigma=np.log(factor),corr=corr,nu=2./3.)
+    dm = turbulent_perturbation(ne_tci,sigma=np.log(factor),corr=corr,seed=seed)
     ne_tci.M = ne_tci.M*np.exp(dm)
     n = np.sqrt(1 - 8.98**2 * ne_tci.M/datapack.radio_array.frequency**2)
     log.info("Refractive index stats:\n\

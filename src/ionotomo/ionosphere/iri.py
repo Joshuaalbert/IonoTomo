@@ -8,10 +8,10 @@ from time import gmtime, mktime, strptime
 def a_priori_model(heights, hmax,lat,lon,time):
     t = gmtime(mktime(strptime(time.isot, "%Y-%m-%dT%H:%M:%S.%f") ))
     year, month, day = t.tm_year,t.tm_mon,t.tm_mday
-    iri = IRI2016Profile(altlim=[1,hmax],altstp=1., lat=lat, lon=lon, year=year, month=month, dom = day, option = 1, verbose=False)
-    h = np.linspace(1.,hmax,int(hmax-1)+1)
+    iri = IRI2016Profile(altlim=[1.,hmax],altstp=1., lat=lat, lon=lon, year=year, month=month, dom = day, option = 1, verbose=False)
     ne = iri.a[0,:]
     ne[ne == -1] = np.min(ne[ne!=-1])
+    h = np.linspace(1.,hmax,len(ne))
     ne_out = np.interp(heights,h,ne)
     return ne_out
 

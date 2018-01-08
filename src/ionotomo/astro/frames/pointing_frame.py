@@ -149,7 +149,7 @@ def itrs_to_pointing(itrs_coo, pointing_frame):
                         itrs_coo.cartesian.x.unit == u.one)
     # 'WGS84'
     lon, lat, height = pointing_frame.location.to_geodetic('WGS84')
-    lst = AltAz(alt=90*u.deg,az=0*u.deg,location=pointing_frame.location,obstime=pointing_frame.fixtime).transform_to(ICRS).ra
+    lst = pointing_frame.obstime.sidereal_time('mean',lon)#AltAz(alt=90*u.deg,az=0*u.deg,location=pointing_frame.location,obstime=pointing_frame.fixtime).transform_to(ICRS).ra
     ha = (lst - pointing_frame.phase.ra).to(u.radian).value
     dec = pointing_frame.phase.dec.to(u.radian).value
     lonrad = lon.to(u.radian).value - ha
@@ -198,7 +198,7 @@ def pointing_to_itrs(pointing_coo, itrs_frame):
     
     #
     lon, lat, height = pointing_coo.location.to_geodetic('WGS84')
-    lst = AltAz(alt=90*u.deg,az=0*u.deg,location=pointing_coo.location,obstime=pointing_coo.fixtime).transform_to(ICRS).ra
+    lst = pointing_coo.obstime.sidereal_time('mean',lon)#lst = AltAz(alt=90*u.deg,az=0*u.deg,location=pointing_coo.location,obstime=pointing_coo.fixtime).transform_to(ICRS).ra
     ha = (lst - pointing_coo.phase.ra).to(u.radian).value
     dec = pointing_coo.phase.dec.to(u.radian).value
     lonrad = lon.to(u.radian).value - ha

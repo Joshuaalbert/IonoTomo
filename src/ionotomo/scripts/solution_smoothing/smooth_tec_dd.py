@@ -20,7 +20,6 @@ else:
 
 tec_conversion = -8.4480e9# rad Hz/tecu
 
-
 def prepare_phase(phase,axis=0,center=True):
     """unwrap phase and mean center
     phase : array
@@ -125,7 +124,11 @@ def plot_prediction(times_predict, times, phase, K, sigma_y = 0,phase_true=None,
         
     plt.legend(frameon=False)
     plt.tight_layout()
-    #plt.show()
+    if figname is not None:
+        plt.savefig(figname)
+    else:
+        plt.show()
+    plt.close()
 
 def plot_bayes_smoothed(times, data, smoothed, std, figname,ant_label,patch_name,type):
     """Plot the smoothed

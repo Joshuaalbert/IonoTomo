@@ -14,58 +14,8 @@ from astropy.coordinates.transformations import FunctionTransform
 from astropy.coordinates.representation import (SphericalRepresentation,
                               UnitSphericalRepresentation,CartesianRepresentation)
 from astropy.coordinates import ITRS,ICRS,AltAz
+from .enu_frame import ENU
 
-
-#class CoordinateAttribute(Attribute):
-#    """
-#    A frame attribute which is a coordinate object. It can be given as a
-#    low-level frame class *or* a `~astropy.coordinates.SkyCoord`, but will
-#    always be converted to the low-level frame class when accessed.
-#    Parameters
-#    ----------
-#    frame : a coordinate frame class
-#        The type of frame this attribute can be
-#    default : object
-#        Default value for the attribute if not provided
-#    secondary_attribute : str
-#        Name of a secondary instance attribute which supplies the value if
-#        ``default is None`` and no value was supplied during initialization.
-#    """
-#    def __init__(self, frame, default=None, secondary_attribute=''):
-#        self._frame = frame
-#        super(CoordinateAttribute, self).__init__(default, secondary_attribute)
-#
-#    def convert_input(self, value):
-#        """
-#        Checks that the input is a SkyCoord with the necessary units (or the
-#        special value ``None``).
-#        Parameters
-#        ----------
-#        value : object
-#            Input value to be converted.
-#        Returns
-#        -------
-#        out, converted : correctly-typed object, boolean
-#            Tuple consisting of the correctly-typed object and a boolean which
-#            indicates if conversion was actually performed.
-#        Raises
-#        ------
-#        ValueError
-#            If the input is not valid for this attribute.
-#        """
-#        if value is None:
-#            return None, False
-#        elif isinstance(value, self._frame):
-#            return value, False
-#        else:
-#            if not hasattr(value, 'transform_to'):
-#                raise ValueError('"{0}" was passed into a '
-#                                 'CoordinateAttribute, but it does not have '
-#                                 '"transform_to" method'.format(value))
-#            transformedobj = value.transform_to(self._frame)
-#            if hasattr(transformedobj, 'frame'):
-#                transformedobj = transformedobj.frame
-#            return transformedobj, True
 
 class UVW(BaseCoordinateFrame):
     """
@@ -141,7 +91,9 @@ def itrs_to_uvw(itrs_coo, uvw_frame):
                         itrs_coo.cartesian.x.unit == u.one)
     
     lon, lat, height = uvw_frame.location.to_geodetic('WGS84')
-    lst = AltAz(alt=90*u.deg,az=0*u.deg,location=uvw_frame.location,obstime=uvw_frame.obstime).transform_to(ICRS).ra
+    lst_ = AltAz(alt=90*u.deg,az=0*u.deg,location=uvw_frame.location,obstime=uvw_frame.obstime).transform_to(ICRS).ra
+    lst = uvw_frame.obstime.sidereal_time('apparent',lon)
+    #print(lst.deg,lst_.deg)
     ha = (lst - uvw_frame.phase.ra).to(u.radian).value
     dec = uvw_frame.phase.dec.to(u.radian).value
     lonrad = lon.to(u.radian).value - ha
@@ -189,7 +141,10 @@ def uvw_to_itrs(uvw_coo, itrs_frame):
     
     
     lon, lat, height = uvw_coo.location.to_geodetic('WGS84')
-    lst = AltAz(alt=90*u.deg,az=0*u.deg,location=uvw_coo.location,obstime=uvw_coo.obstime).transform_to(ICRS).ra
+    lst_ = AltAz(alt=90*u.deg,az=0*u.deg,location=uvw_coo.location,obstime=uvw_coo.obstime).transform_to(ICRS).ra
+    lst = uvw_coo.obstime.sidereal_time('apparent',lon)
+    #print(lst.deg,lst_.deg)
+
     ha = (lst - uvw_coo.phase.ra).to(u.radian).value
     dec = uvw_coo.phase.dec.to(u.radian).value
     lonrad = lon.to(u.radian).value - ha

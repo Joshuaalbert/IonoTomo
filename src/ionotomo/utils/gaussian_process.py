@@ -535,8 +535,8 @@ class PeriodicSep(KernelND):
 class SquaredExponentialSep(KernelND):
     def __init__(self,ndims,dim,l=1.,sigma=1.):
         super(SquaredExponentialSep,self).__init__(ndims)
-        assert dim < ndims and dim >= 0
-        self.dim = int(dim)
+        #assert dim < ndims and dim >= 0
+        self.dim = dim
         self.hyperparams = [l,sigma]
         self.hyperparams_bounds = [[1e-5,1e5],[1e-5,1e5]]
     def create(self):
@@ -547,9 +547,9 @@ class SquaredExponentialSep(KernelND):
         super(SquaredExponentialSep,self).create()
     def eval_positional_args(self,X,Y=None):
         if Y is None:
-            dist = squareform(pdist(X[:,[self.dim]],metric='sqeuclidean'))#r2
+            dist = squareform(pdist(X[:,self.dim],metric='sqeuclidean'))#r2
         else:
-            dist = cdist(X[:,[self.dim]],Y[:,[self.dim]],metric='sqeuclidean')#r2
+            dist = cdist(X[:,self.dim],Y[:,self.dim],metric='sqeuclidean')#r2
         return [dist]
 
 class Diagonal(KernelND):
@@ -758,7 +758,6 @@ def log_mar_like(hyperparams,x,y,sigma_y,K):
 
 
 
-
 def level2_solve(x,y,sigma_y,K,n_random_start=0):
     '''Solve the ML covariance hyperparameters based on data and gradient descent.
     x is shape (num_points,2), y is shape(num_points,)'''
@@ -836,7 +835,7 @@ def example_level2_solve():
     K8 = PeriodicSep(2,1,l=0.5)
     K8.fixed='l'
     K9 = DotProduct(2)
-    K = K1
+    K = K3
     hp = K.hyperparams 
     x = np.random.uniform(size=[250,2])
     xstar = np.linspace(-1,2,100)
@@ -853,8 +852,10 @@ def example_level2_solve():
     import pylab as plt
     vmin = np.min(y) + m_y
     vmax = np.max(y) + m_y
-    plt.imshow(fstar.reshape(Xstar.shape)+m_y,extent=(-1,2,-1,2),origin='lower',vmin=vmin,vmax=vmax)
-    plt.scatter(x[:,0],x[:,1],c=y+m_y)
+    sc=plt.imshow(fstar.reshape(Xstar.shape)+m_y,extent=(-1,2,-1,2),origin='lower',vmin=vmin,vmax=vmax)
+    plt.colorbar(sc)
+    sc=plt.scatter(x[:,0],x[:,1],c=y+m_y)
+    plt.colorbar(sc)
     #plt.scatter(xstar[:,0],xstar[:,1],c=fstar,marker='+')
     plt.show()
 

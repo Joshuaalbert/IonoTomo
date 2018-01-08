@@ -7,12 +7,15 @@ class Pipeline(object):
         self.results = {}
         self.current_graph = None
         self.graphs = {}
-        self.add_graph('default_graph')
 
-    def add_graph(self,name):
-        self.graphs[name] = tf.Graph()
-        self.current_graph = name
-    def choose_graph(self,graph_name):
+    def add_graph(self,name, graph = None):
+        if graph is None:
+            self.graphs[name] = tf.Graph()
+        else:
+            self.graphs[name] = graph
+        self.set_current_graph(name)
+
+    def set_current_graph(self,graph_name):
         assert graph_name in self.graphs.keys()
         self.current_graph = graph_name
 
@@ -21,10 +24,18 @@ class Pipeline(object):
             assert graph_name in self.graphs.keys()
             graph = self.graphs[graph_name]
         else:
+            assert self.current_graph is not None, "No graph set"
             graph = self.graphs[self.current_graph]
         return graph
 
-    def add_variable(self,name, shape=(), init_value=None, dtype = TFSettings.tf_float,trainable=False,persistent=True,graph_name=None):
+    def _remove_nans_complex(self,a):
+        real = tf.real(a)
+        imag = tf.imag(a)
+        real = tf.where(tf.is_nan(real), tf.zeros_like(real), real)
+        imag = tf.where(tf.is_nan(imag), tf.zeros_like(imag), imag)
+        return tf.cast(real,a.dtype) + 1j*tf.cast(imag,a.dtype)
+
+    def add_variable(self,name, shape=(), init_value=None, dtype = TFSettings.tf_float,trainable=False,persistent=True,graph_name=None,remove_nans=False):
         """Add to graph given by graph_name or self.current_graph 
         a variable with initializer if persistent is True, or just a placeholder if False"""
             
@@ -32,13 +43,24 @@ class Pipeline(object):
             if persistent:
                 assert init_value is not None
                 init = tf.placeholder(shape=init_value.shape,dtype=dtype,name="{}_init".format(name))
-                var = tf.get_variable(name,initializer=init,trainable=trainable)
+                if remove_nans:
+                    if init.dtype in [tf.complex64, tf.complex128]:
+                        var = tf.get_variable(name,
+                            initializer=self._remove_nans_complex(init),
+                            trainable=trainable)
+                    else:
+                        var = tf.get_variable(name,
+                                initializer=tf.where(tf.is_nan(init),tf.zeros_like(init),init),
+                                trainable=trainable)
+                else:
+                    var = tf.get_variable(name,initializer=init,trainable=trainable)
                 self.placeholders[name] = (init,var,init_value)
                 return var
             else:
                 var = tf.placeholder(shape=shape,dtype=dtype,name="{}".format(name))
                 self.placeholders[name] = (var,None,None)
                 return var
+
     def initialize_graph(self,sess,graph_name=None):
         inits = self.get_initializers(graph_name)
         with self.get_graph(graph_name).as_default():
@@ -73,6 +95,21 @@ class Pipeline(object):
                     if g.is_fetchable(self.placeholders[name][0]):
                         inits[self.placeholders[name][0]] = self.placeholders[name][2]
             return inits
+
+    def store_ops(self, ops, names, model_scope = "", graph_name=None):
+        assert len(ops) == len(names)
+        g = self.get_graph(graph_name)
+        with g.as_default():
+            for op,name in zip(ops,names):
+                tf.add_to_collection(model_scope+name, op)
+            
+    def grab_ops(self,names, model_scope = "", graph_name = None):
+        g = self.get_graph(graph_name)
+        with g.as_default():
+            ops = []
+            for name in names:
+                ops.append(tf.get_collection(model_scope+name)[0])
+        return ops
 
     def add_result(self,name,result):
         """Add a tensor or op as result with given name"""

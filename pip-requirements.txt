@@ -10,3 +10,4 @@ astropy
 tf-nightly
 cmocean
 dask[complete]
+sympy
