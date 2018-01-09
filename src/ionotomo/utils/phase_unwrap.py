@@ -44,12 +44,13 @@ class PhaseUnwrap(object):
                 phi_var_placeholder = \
                         tf.placeholder(tf.float32,shape=shape,name='phi_var')
                 keep_prob_placeholder = tf.placeholder(tf.float32,shape=(),name='keep_prob')
+                ent_w = tf.placeholder(tf.float32,shape=(),name='ent_w')
                 learning_rate_placeholder = tf.placeholder(tf.float32,shape=(),name='learning_rate')
                 
-                phase_unwrap_op, losses, K_dist = self._build_phase_unwrap(phi_wrap_placeholder,phi_var_placeholder,keep_prob_placeholder,learning_rate_placeholder)
-                self.pipeline.initialize_graph(self.sess)
-                self.pipeline.store_ops(["phi_wrap","phi_var","phase_unwrap","losses","K_dist","keep_prob","learning_rate"],
-                        [phi_wrap_placeholder,phi_var_placeholder, phase_unwrap_op, losses, K_dist, keep_prob_placeholder, learning_rate_placeholder], self.model_scope)
+                phase_unwrap_op, losses, K_dist = self._build_phase_unwrap(phi_wrap_placeholder,phi_var_placeholder,keep_prob_placeholder,learning_rate_placeholder,ent_w)
+                self.pipeline.store_ops([ent_w,phi_wrap_placeholder,phi_var_placeholder, phase_unwrap_op, losses, K_dist, keep_prob_placeholder, learning_rate_placeholder],
+                                        ["ent_w","phi_wrap","phi_var","phase_unwrap","losses","K_dist","keep_prob","learning_rate"], 
+                                        self.model_scope)
 
     def phase_unwrap(self, phi_wrap, phi_var = None):
         """Run the simulation for current model"""
@@ -60,12 +61,15 @@ class PhaseUnwrap(object):
         if len(phi_var.shape) == 1:
             phi_var = phi_var[:,None,None]
         with self.graph.as_default():
-            phi_wrap_placeholder,phi_var_placeholder, phase_unwrap_op, losses, K_dist,keep_prob_placeholder, learning_rate_placeholder = \
-                    self.pipeline.grab_ops(["phi_wrap","phi_var","phase_unwrap","losses","K_dist","keep_prob","learning_rate"], self.model_scope)
-            sess.run(tf.global_variables_initializer())
+            ent_w, phi_wrap_placeholder,phi_var_placeholder, phase_unwrap_op, losses, K_dist,keep_prob_placeholder, learning_rate_placeholder = \
+                    self.pipeline.grab_ops(["ent_w","phi_wrap","phi_var","phase_unwrap","losses","K_dist","keep_prob","learning_rate"], self.model_scope)
+            #self.sess.run(tf.global_variables_initializer())
+            self.pipeline.initialize_graph(self.sess)
+            loss_sum = np.inf
             for epoch in range(25000):
                 lr = 0.1
                 dp = 0.2
+                ew = 0.
                 if epoch > 1000:
                     lr = 0.1
                     dp = 0.3
@@ -81,14 +85,21 @@ class PhaseUnwrap(object):
                 if epoch > 20000:
                     lr = 0.001
                     dp = 0.8
+                if loss_sum < 1.:
+                    ew = 1e-6
+                if loss_sum < 0.5:
+                    ew = 1e-4
+                if loss_sum < 0.1:
+                    ew = 1e-2
                 _, losses_val,K_dist_val = self.sess.run([phase_unwrap_op,losses,K_dist],
                         feed_dict={phi_wrap_placeholder:phi_wrap,
                 phi_var_placeholder:phi_var,keep_prob_placeholder:dp,
-                learning_rate_placeholder:lr})
+                learning_rate_placeholder:lr,
+                                  ent_w:ew})
     
-                if np.sum(losses_val) < 0.1 or (epoch + 1) % 1000 == 0:
+                if np.sum(losses_val) < 0.05 or (epoch + 1) % 1000 == 0:
                     print("Epoch : {} loss={:.4f} | LSE: {:.4f} | Residue: {:.4f} | Entropy: {:.4f} | TV: {:.4f} ".format(epoch,np.sum(losses_val),*losses_val))
-                if np.sum(losses_val) < 0.1:
+                if np.sum(losses_val) < 0.05:
                     break
                          
             f_rec = np.zeros_like(phi_wrap)
@@ -140,7 +151,7 @@ class PhaseUnwrap(object):
         return path,triplets
 
 
-    def _build_phase_unwrap(self, phi_wrap_placeholder,phi_var_placeholder,keep_prob_placeholder,learning_rate_placeholder):
+    def _build_phase_unwrap(self, phi_wrap_placeholder,phi_var_placeholder,keep_prob_placeholder,learning_rate_placeholder,ent_w):
         with self.graph.as_default():
             with tf.name_scope("unwrapper"):
                 def _wrap(a):
@@ -184,7 +195,7 @@ class PhaseUnwrap(object):
 
                 
                 opt = tf.train.AdamOptimizer(learning_rate=learning_rate_placeholder)
-                train_op = opt.minimize(loss_lse+entropy+loss_residue+loss_tv)
+                train_op = opt.minimize(loss_lse+ent_w*entropy+loss_residue+loss_tv)
 
                 losses = [loss_lse ,loss_residue,entropy,loss_tv]
                 return train_op, losses, K_dist
@@ -274,23 +285,70 @@ def generate_data_nonaliased_nonsquare(noise=0.,sample=100):
     sample : int
         number to sample
     """
-    #max gradient at b
-    a = 20
-    b = 1
-    max_slope = np.abs(a/np.sqrt(np.exp(1))/b)
-    
-    #in dx want max_slope*dx = np.pi (nyquist limit)
-    dx = np.pi/max_slope/2.
-    
-    #dx = sqrt(D^2/samples)
+    #max gradient at a
     assert sample > 0
-    D = np.sqrt(dx**2*sample)
     
-    X = np.random.uniform(low=-D/2.,high=D/2.,size=(sample,2))
+    dx = int(np.ceil(2*np.pi/np.sqrt(sample)))
+
+    a = 2*np.pi/dx/(2*(np.cos(2.*3/8*np.pi) - np.sin(2.*3/8*np.pi)))
     
-    phi = a * np.exp(-(X[:,0]**2 + X[:,1]**2)/2./b**2)
+    #in dx want max_slope*dx < np.pi (nyquist limit)
+    
+    
+    X = np.random.uniform(low=-np.pi,high=np.pi,size=(sample,2))
+    
+    phi = a * (np.sin(2*X[:,0]) + np.cos(2*X[:,1])) 
     
     phi += a*noise*np.random.normal(size=phi.shape)
+
+    return X,phi
+
+def generate_data_nonaliased_nonsquare(noise=0.,sample=100,a_base=0.1):
+    """Generate Gaussian bump in phase.
+    noise : float
+        amount of gaussian noise to add as fraction of peak height
+    sample : int
+        number to sample
+    """
+    #max gradient at a
+    assert sample > 0
+    
+    dx = int(np.ceil(2*np.pi/np.sqrt(sample)))
+
+    a = a_base*np.pi/dx
+    
+    #in dx want max_slope*dx < np.pi (nyquist limit)
+    
+    
+    X = np.random.uniform(low=0,high=1,size=(sample,2))
+    
+    phi = a * X[:,0] + a * X[:,1]
+    
+    phi += a*noise*np.random.normal(size=phi.shape)
+    
+    phi [sample >> 1] += np.pi
+
+    return X,phi
+
+def generate_data_nonaliased_nonsquare_many(noise=0.,sample=100,n_cum=2,n_ind=3):
+    """Generate fake (num_direction, cumulant, indepdenent)"""
+    #max gradient at a
+    assert sample > 0
+    
+    dx = int(np.ceil(2*np.pi/np.sqrt(sample)))
+
+    a = np.pi/dx*np.random.normal(size=[1,n_cum,n_ind])*2
+    
+    #in dx want max_slope*dx < np.pi (nyquist limit)
+    
+    
+    X = np.random.uniform(low=0,high=1,size=(sample,2))
+    
+    phi = a * X[:,0,None,None] + a * X[:,1,None,None]
+    
+    phi += a*noise*np.random.normal(size=phi.shape)
+    
+    #phi [sample >> 1,:,:] += np.pi
 
     return X,phi
 
@@ -318,21 +376,20 @@ def plot_phase(X,phi,label=None,figname=None):
 
 
 def test_phase_unwrap():
-    X,phi = generate_data_nonaliased_nonsquare(0.03,sample=100)
-    phi_wrap = np.angle(np.exp(1j*phi))[:,None,None]
+    #X,phi = generate_data_nonaliased_nonsquare(0.1,sample=100)
+    X,phi = generate_data_nonaliased_nonsquare_many(noise=0.05,sample=100,n_cum=2,n_ind=3)
+    phi_wrap = np.angle(np.exp(1j*phi))
     graph = tf.Graph()
     with tf.Session(graph = graph) as sess:
         pu = PhaseUnwrap(X, phi_wrap.shape, redundancy=2, sess = sess, graph = graph)
         f_rec = pu.phase_unwrap(phi_wrap)
 
-
-
-    plot_phase(X,phi_wrap,label='phi_wrap',figname='phi_wrap.png')
-    plot_phase(X,f_rec,label='f_rec',figname='phi_rec.png')
-    plot_phase(X,phi,label='true',figname='phi_true.png')
-    plot_phase(X,f_rec-phi,label='f_rec - true',figname='rec_true_diff.png')
-    plot_phase(X,(f_rec-np.angle(np.exp(1j*f_rec)))/(2*np.pi),label='jumps',figname='jumps_rec.png')
-    plot_phase(X,(phi-phi_wrap)/(2*np.pi),label='true jumps',figname='jumps_true.png')
+    plot_phase(X,phi_wrap[:,0,0],label='phi_wrap',figname=None)
+    plot_phase(X,f_rec[:,0,0],label='f_rec',figname=None)
+    plot_phase(X,phi[:,0,0],label='true',figname=None)
+    plot_phase(X,(f_rec-phi)[:,0,0],label='f_rec - true',figname=None)
+    plot_phase(X,(f_rec-np.angle(np.exp(1j*f_rec)))[:,0,0]/(2*np.pi),label='jumps',figname=None)
+    plot_phase(X,(phi-phi_wrap)[:,0,0]/(2*np.pi),label='true jumps',figname=None)
 
 if __name__=='__main__':
     test_phase_unwrap()
