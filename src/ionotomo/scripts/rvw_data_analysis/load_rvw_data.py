@@ -130,42 +130,49 @@ def import_data(dd_file, di_file, slow_gain, datapack_file, clobber=False,dd_onl
             f_dd['/sol000/tec000/val'][:,:,:,0], 
             freqs_inv)
     #Na
-    #const = np.mean(np.mean(np.expand_dims(f_di['/sol000/phasesoffset000/val'][0,0,:,0,:], -1) + np.transpose(f_dd['/sol000/scalarphase000/val'][:,:,:,0],[1,0,2]),axis=2),axis=1)#radians
-    f_dd.close()
-    f_di.close()
-
+    const = np.mean(np.mean(np.expand_dims(f_di['/sol000/phasesoffset000/val'][0,0,:,0,:], -1) + np.transpose(f_dd['/sol000/scalarphase000/val'][:,:,:,0],[1,0,2]),axis=2),axis=1)#radians
+    
+    
     #uncertainty estimates
     print("getting uncertainty")
-    #30,500,62,42
-    slow_gain_phases = np.mean(f_sg['/sol000/phase000/val'][:,:,:,:,:],axis=4)
-    t_sg = (np.arange(slow_gain_phases.shape[0]) + 0.5)*(times[-1].gps - times[0].gps) + times[0].gps
-    t_interp = times.gps
-    f_sg.close()
+    try:
+        uncert = np.einsum("jik,l->ijkl",
+            f_dd['/sol000/error000/val'][:,:,:,0], 
+            np.ones(Nf))
+    except:
+        #30,500,62,42
+        slow_gain_phases = np.mean(f_sg['/sol000/phase000/val'][:,:,:,:,:],axis=4)
+        t_sg = (np.arange(slow_gain_phases.shape[0]) + 0.5)*(times[-1].gps - times[0].gps) + times[0].gps
+        t_interp = times.gps
+        
 
-    v0 = np.var(phase_unwrapp1d(slow_gain_phases,axis=0),axis=0,keepdims=True)
-    v1 = np.var(np.transpose(phase_unwrapp1d(np.transpose(slow_gain_phases,axes=[1,0,2,3]),axis=0),axes=[1,0,2,3]),axis=1,keepdims=True)
-    std = np.transpose(np.sqrt((v0 + v1)),axes=[2,0,3,1])
+        v0 = np.var(phase_unwrapp1d(slow_gain_phases,axis=0),axis=0,keepdims=True)
+        v1 = np.var(np.transpose(phase_unwrapp1d(np.transpose(slow_gain_phases,axes=[1,0,2,3]),axis=0),axes=[1,0,2,3]),axis=1,keepdims=True)
+        std = np.transpose(np.sqrt((v0 + v1)),axes=[2,0,3,1])
 
-    uncert = np.zeros([Na,Nt,Nd,Nf])
-    i = np.searchsorted(t_sg,t_interp) - 1
-    start = i
-    end = i + 1
-    uncert = (std[:,start,:,:] * ((t_interp - t_sg[start])[None,:,None,None]) + std[:,end,:,:] * ((t_sg[end] - t_interp)[None,:,None,None]))/((t_sg[end] - t_sg[start])[None,:,None,None])
-#    for j in range(Nt):
-#        start = i[j]
-#        end = i[j] + 1
-#        uncert[:,j,:,:] = (std[:,start,:,:] * (t_interp[j] - t_sg[start]) + std[:,end,:,:] * (t_sg[end] - t_interp[j]))/(t_sg[end] - t_sg[start])
-#        uncert[:,j*120:min((j+1)*120,Nt),:,:] = std[:,j:j+1,:,:]
+        uncert = np.zeros([Na,Nt,Nd,Nf])
+        i = np.searchsorted(t_sg,t_interp) - 1
+        start = i
+        end = i + 1
+        uncert = (std[:,start,:,:] * ((t_interp - t_sg[start])[None,:,None,None]) + std[:,end,:,:] * ((t_sg[end] - t_interp)[None,:,None,None]))/((t_sg[end] - t_sg[start])[None,:,None,None])
+    #    for j in range(Nt):
+    #        start = i[j]
+    #        end = i[j] + 1
+    #        uncert[:,j,:,:] = (std[:,start,:,:] * (t_interp[j] - t_sg[start]) + std[:,end,:,:] * (t_sg[end] - t_interp[j]))/(t_sg[end] - t_sg[start])
+    #        uncert[:,j*120:min((j+1)*120,Nt),:,:] = std[:,j:j+1,:,:]
 
 
-    #ijkl 
-    #phase = phaseoffset_di + tec_di + clock_di + scalarphase_dd + tec_dd
+        #ijkl 
+        #phase = phaseoffset_di + tec_di + clock_di + scalarphase_dd + tec_dd
 
-    #fill out some of the values
+        #fill out some of the values
     variance = uncert**2
     #prop = tec_dd#+ scalarphase_dd#tec_di + tec_dd#radians
+    f_dd.close()
+    f_di.close()
+    f_sg.close()
     
-    data_dict.update({'phase':phase 'variance':variance})
+    data_dict.update({'phase':phase, 'clock':clock, 'const':const, 'variance':variance})
     print("creating datapack")
     datapack = DataPack(data_dict)
     datapack.set_reference_antenna(antenna_labels[0])
@@ -177,16 +184,16 @@ def import_data(dd_file, di_file, slow_gain, datapack_file, clobber=False,dd_onl
     return datapack
 
 if __name__=='__main__':
-    import_data("../../data/NsolutionsDDE_2.5Jy_tecandphasePF_correctedlosoto.hdf5",
+    import_data("../../data/NsolutionsDDE_2.5Jy_tecandphasePF_correctedlosoto_fulltime_dec27.h5",
             "../../data/DI.circ.hdf5",
-            "../../data/slow_gains.hdf5",
-            "rvw_datapack_full_phase.hdf5",
-            clobber=True)
+            "../../data/slowgains_dec27.h5",
+            "rvw_datapack_full_phase_dec27.hdf5",
+            clobber=True, dd_only=True)
     from ionotomo.plotting.plot_tools import plot_datapack, animate_datapack
-    datapack = DataPack(filename="rvw_datapack_full_phase.hdf5")
-    #animate_datapack(datapack,"rvw_datapack_animation_phase", num_threads=1,mode='perantenna',observable='phase')
-    animate_datapack(datapack,"rvw_datapack_animation_std", num_threads=1,mode='perantenna',observable='std')
-
+    datapack = DataPack(filename="rvw_datapack_full_phase_dec27.hdf5")
+    animate_datapack(datapack,"rvw_datapack_animation_std_dec27", num_threads=1,mode='perantenna',observable='std')
+    animate_datapack(datapack,"rvw_datapack_animation_phase_dec27", num_threads=1,mode='perantenna',observable='phase')
+    
 
 
 
