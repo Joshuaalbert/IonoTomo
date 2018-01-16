@@ -330,7 +330,7 @@ def plot_datapack(datapack,ant_idx=-1,time_idx=[0], dir_idx=-1,freq_idx=-1,figna
             plt.show()
         plt.close()
     
-def animate_datapack(datapack,output_folder, ant_idx=-1,time_idx=-1,dir_idx=-1,num_threads=1,mode='perantenna',observable='phase'):
+def animate_datapack(datapack,output_folder, ant_idx=-1,time_idx=-1,dir_idx=-1,num_threads=1,mode='perantenna',observable='phase',**kwargs):
     from dask.threaded import get
     from functools import partial
     try:
@@ -353,7 +353,7 @@ def animate_datapack(datapack,output_folder, ant_idx=-1,time_idx=-1,dir_idx=-1,n
 #        objective.append(thread)
     for j in range(Nt):
         fig = os.path.join(output_folder,"fig-{:04d}".format(j))
-        plot_datapack(datapack,ant_idx=ant_idx,time_idx=[j], dir_idx=dir_idx,figname=fig,mode=mode,observable=observable)
+        plot_datapack(datapack,ant_idx=ant_idx,time_idx=[j], dir_idx=dir_idx,figname=fig,mode=mode,observable=observable,**kwargs)
 
     #get(dsk,objective,num_workers=num_threads)
     make_animation(output_folder,prefix="fig",fps=int(10))
