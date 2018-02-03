@@ -216,7 +216,7 @@ def plot_datapack(datapack,ant_idx=-1,time_idx=[0], dir_idx=-1,freq_idx=-1,figna
     if phase_wrap:
         obs = np.angle(np.exp(1j*obs))
         vmin = -np.pi
-        vmax = np.pi
+        vmax = np.p
         cmap = phase_cmap
     else:
         vmin = vmin or np.percentile(obs.flatten(), 5)

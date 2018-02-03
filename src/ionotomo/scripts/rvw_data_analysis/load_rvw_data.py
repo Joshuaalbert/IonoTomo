@@ -31,7 +31,7 @@ def error_map(phase):
     std = np.sqrt((v0 + v1))
     return std
 
-def import_data(dd_file, di_file, slow_gain, datapack_file, clobber=False,dd_only = False):
+def import_data(dd_file, di_file, slow_gain, datapack_file, clobber=False,dd_only = False,chan_per_block = 20):
     """Create a datapack from the direction (de)independent files.
     dd_file : str
         path to dd solutions made by NDPPP
@@ -83,6 +83,8 @@ def import_data(dd_file, di_file, slow_gain, datapack_file, clobber=False,dd_onl
 
     #freqs = f_di['/sol000/phasesoffset000/freq'][...]#Hz
     freqs = f_sg['/sol000/phase000/freq'][...]
+    df = (freqs[1] - freqs[0])/2.
+    freqs = np.sort(np.concatenate([np.linspace(f-df,f+df,int(chan_per_block)) for f in freqs]))
     Nf = len(freqs)
 
     data_dict = {"radio_array":radio_array,"times":times, "timestamps": timestamps, "directions": directions, 
@@ -184,15 +186,15 @@ def import_data(dd_file, di_file, slow_gain, datapack_file, clobber=False,dd_onl
     return datapack
 
 if __name__=='__main__':
-    import_data("../../data/NsolutionsDDE_2.5Jy_tecandphasePF_correctedlosoto_fulltime_dec27.h5",
-            "../../data/DI.circ.hdf5",
-            "../../data/slowgains_dec27.h5",
-            "rvw_datapack_full_phase_dec27.hdf5",
-            clobber=True, dd_only=True)
+#    import_data("../../data/NsolutionsDDE_2.5Jy_tecandphasePF_correctedlosoto_fulltime_dec27.h5",
+#            "../../data/DI.circ.hdf5",
+#            "../../data/slowgains_dec27.h5",
+#            "rvw_datapack_full_phase_dec27_fullfreq.hdf5",
+#            clobber=True, dd_only=True)
     from ionotomo.plotting.plot_tools import plot_datapack, animate_datapack
-    datapack = DataPack(filename="rvw_datapack_full_phase_dec27.hdf5")
-    animate_datapack(datapack,"rvw_datapack_animation_std_dec27", num_threads=1,mode='perantenna',observable='std')
-    animate_datapack(datapack,"rvw_datapack_animation_phase_dec27", num_threads=1,mode='perantenna',observable='phase')
+    datapack = DataPack(filename="rvw_datapack_full_phase_dec27_fullfreq.hdf5")
+#    animate_datapack(datapack,"rvw_datapack_animation_std_dec27", num_threads=1,mode='perantenna',observable='std')
+    animate_datapack(datapack,"rvw_datapack_animation_phase_dec27_fullfreq", num_threads=1,mode='perantenna',observable='phase',phase_wrap=False)
     
 
 
