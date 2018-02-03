@@ -38,20 +38,30 @@ class SimulateTec(object):
         self.model_scope = "simulate_tec"
         with self.graph.as_default():
             with tf.variable_scope(self.model_scope):
+                grid_placeholders = [tf.placeholder(shape=(None,),dtype=TFSettings.tf_float,name='grid_{}'.format(i)) for i in range(3)]
+#                grid_shapes = [tf.shape(grid_placeholders[i]) for i in range(3)]
+#                model_shape = tf.concat(grid_shapes,axis=0)
                 model_placeholder = \
-                        tf.placeholder(TFSettings.tf_float,shape=self.model0.shape,name='model')
-                simulate_tec_op = self._build_simulate_tec(model_placeholder)
+                        tf.placeholder(TFSettings.tf_float,shape=(None,None,None),name='model')
+                simulate_tec_op = self._build_simulate_tec(grid_placeholders,model_placeholder)
                 self.pipeline.initialize_graph(self.sess)
                 tf.add_to_collection(self.model_scope+"model", model_placeholder)
+                tf.add_to_collection(self.model_scope+"grid", grid_placeholders)
                 tf.add_to_collection(self.model_scope+"simulate_tec_op", simulate_tec_op)
+    
+    def set_grid(self, grid):
+        self.grid = tuple(grid)
+
+    def set_model0(self,model0):
+        self.model0 = model0
 
     def close(self):
         self.sess.close()
 
-    def _build_simulate_tec(self, model_placeholder):
+    def _build_simulate_tec(self, grid_placeholders, model_placeholder):
         rays = self.pipeline.add_variable("rays",init_value=self.rays)
-        grid = [self.pipeline.add_variable("grid{}".format(i),init_value=self.grid[i]) for i in range(3)]
-        integrator = TECForwardEquation(0,grid,model_placeholder,rays)
+        #grid = [self.pipeline.add_variable("grid{}".format(i),init_value=self.grid[i]) for i in range(3)]
+        integrator = TECForwardEquation(0,grid_placeholders,model_placeholder,rays)
         tec = integrator.matmul(tf.ones_like(model_placeholder))/1e13#km m^2
         return tec
 
@@ -59,15 +69,21 @@ class SimulateTec(object):
         """Run the simulation for current model"""
         with self.graph.as_default():
             model_placeholder = tf.get_collection(self.model_scope+"model")[0]
+            grid_placeholders = tf.get_collection(self.model_scope+"grid")[0]
             simulate_tec_op = tf.get_collection(self.model_scope+"simulate_tec_op")[0]
-            tec = self.sess.run(simulate_tec_op, feed_dict={model_placeholder:self.model})
+            tec = self.sess.run(simulate_tec_op, feed_dict={model_placeholder:self.model,
+                                                            grid_placeholders[0]:self.grid[0],
+                                                            grid_placeholders[1]:self.grid[1],
+                                                            grid_placeholders[2]:self.grid[2]
+                                                            })
         return tec
 
-    def generate_model(self,factor=2.,corr=10.,seed=None):
+    def generate_model(self,factor=1.01,corr=10.,seed=None):
         log.info("Generating turbulent ionospheric model, correlation scale : {}".format(corr))
         if seed is not None:
             np.random.seed(seed)
             log.info("Seeding random seed to : {}".format(seed))
+        assert self.model0.shape == (self.grid[0].shape[0],self.grid[1].shape[0],self.grid[2].shape[0]), "Your grid and model0 shapes are mismatched"
         dm = turbulent_perturbation(self.grid, sigma=np.log(factor), corr=corr,seed=seed)
         np.exp(dm,out=dm)
         self.model = self.model0*dm
@@ -87,6 +103,12 @@ def test_simulate_tec():
     Sim = SimulateTec(datapack,ant_idx=-1,time_idx=-1,dir_idx=-1,spacing=1.,res_n=201)
     Sim.generate_model()
     print(Sim.simulate_tec())
+    model0 = Sim.model0[1:,:,:]
+    grid = list(Sim.grid)
+    grid[0] = grid[0][1:]
+    Sim.set_model0(model0)
+    Sim.set_grid(grid)
+    
     print(Sim.simulate_tec())
 
 if __name__ == '__main__':

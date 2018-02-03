@@ -191,7 +191,7 @@ def animate_tci_slices(TCI,output_folder,num_seconds=10.):
     make_animation(output_folder,prefix='fig',fps=int(TCI.nz/float(num_seconds)))        
 
   
-def plot_datapack(datapack,ant_idx=-1,time_idx=[0], dir_idx=-1,freq_idx=-1,figname=None,vmin=None,vmax=None,mode='perantenna',observable='phase',phase_wrap=True,res_N = 25):
+def plot_datapack(datapack,ant_idx=-1,time_idx=[0], dir_idx=-1,freq_idx=-1,figname=None,vmin=None,vmax=None,mode='perantenna',observable='phase',phase_wrap=True,res_N = 25, plot_crosses=True):
     '''Plot phase at central frequency'''
     assert datapack.ref_ant is not None, "set DataPack ref_ant first"
     if len(time_idx) == 1 and figname is not None:
@@ -212,6 +212,12 @@ def plot_datapack(datapack,ant_idx=-1,time_idx=[0], dir_idx=-1,freq_idx=-1,figna
     elif observable == 'std':
         phase_wrap = False
         obs = np.sqrt(datapack.get_variance(ant_idx = ant_idx,dir_idx=dir_idx,time_idx=time_idx, freq_idx = freq_idx))
+    elif observable == 'snr':
+        obs = np.abs(datapack.get_phase(ant_idx = ant_idx,dir_idx=dir_idx,time_idx=time_idx, freq_idx = freq_idx) \
+                / (np.sqrt(datapack.get_variance(ant_idx = ant_idx,dir_idx=dir_idx,time_idx=time_idx, freq_idx = freq_idx)) + 1e-10))
+        phase_wrap = False
+
+    #print("Plotting observable: {}".format(observable))
     
     if phase_wrap:
         obs = np.angle(np.exp(1j*obs))
@@ -219,9 +225,10 @@ def plot_datapack(datapack,ant_idx=-1,time_idx=[0], dir_idx=-1,freq_idx=-1,figna
         vmax = np.p
         cmap = phase_cmap
     else:
-        vmin = vmin or np.percentile(obs.flatten(), 5)
-        vmax = vmax or np.percentile(obs.flatten(), 95)
+        vmin = vmin or np.percentile(obs.flatten(), 2.5)
+        vmax = vmax or np.percentile(obs.flatten(), 97.5)
         cmap = plt.cm.bone
+    print(vmin,vmax)
 
 
     Na = len(antennas)
@@ -277,8 +284,9 @@ def plot_datapack(datapack,ant_idx=-1,time_idx=[0], dir_idx=-1,freq_idx=-1,figna
                 
                 im = ax.imshow(D,origin='lower',extent=(np.min(U),np.max(U),np.min(V),np.max(V)),aspect='auto',
                               vmin = vmin, vmax= vmax,cmap=cmap,alpha=1.)
-                sc1 = ax.scatter(dirs_uvw.u.value*factor300,dirs_uvw.v.value*factor300, c='black',
-                                marker='+')
+                if plot_crosses:
+                    sc1 = ax.scatter(dirs_uvw.u.value*factor300,dirs_uvw.v.value*factor300, c='black',
+                                    marker='+')
                 i += 1
             #plt.tight_layout()
             fig.subplots_adjust(right=0.8)
