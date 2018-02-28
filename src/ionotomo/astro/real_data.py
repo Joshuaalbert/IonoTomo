@@ -473,7 +473,41 @@ class DataPack(object):
         self.freqs = self.freqs[mask]
         self.phase = self.phase[:,:,:,mask]
         self.variance = self.variance[:,:,:,mask]
-        self.Nf = len(self.freqs)        
+        self.Nf = len(self.freqs)    
+    def export_losoto(self, filename, tabs=['phase']):
+        """
+        Exports into losoto format.
+        tabs: list of dataslots to export, default ['phase']
+        """
+        with h5py.File(filename,'w') as f:
+
+            # create antenna dataset
+            f['/sol000/antenna'] = \
+                    [(label.encode(), loc.transform_to(ac.ITRS).cartesian.xzy.to(au.m).value) \
+                    for label, loc in zip(self.antenna_labels, self.antennas)]
+
+            # create source dataset
+            f['/sol000/source'] = \
+                    [(patch.encode(), [d.ra.rad, d.dec.rad]) \
+                    for patch, d in zip(self.patch_names,self.directions)]
+            if 'phase' in tabs:
+                f['/sol000/phase000/ant'] = np.array([label.encode() for label in self.antenna_labels])
+                f['/sol000/phase000/dir'] = np.array([patch.encode() for patch in self.patch_names])
+                f['/sol000/phase000/freq'] = self.freqs
+                f['/sol000/phase000/time'] = self.times.mjd*86400.
+                f['/sol000/phase000/val'] = np.transpose(self.phase,(1,3,0,2))
+                f['/sol000/phase000/weight'] = np.ones([self.Nt,self.Nf,self.Na, self.Nd])
+            if 'error' in tabs:
+                f['/sol000/error000/ant'] = np.array([label.encode() for label in self.antenna_labels])
+                f['/sol000/error000/dir'] = np.array([patch.encode() for patch in self.patch_names])
+                f['/sol000/error000/freq'] = self.freqs
+                f['/sol000/error000/time'] = self.times.mjd*86400.
+                f['/sol000/error000/val'] = np.transpose(np.sqrt(self.variance),(1,3,0,2))
+                f['/sol000/error000/weight'] = np.ones([self.Nt,self.Nf,self.Na, self.Nd])
+
+
+             
+
 
 def generate_example_datapack(Nant = 10, Ntime = 1, Ndir = 10, Nfreqs=4, fov = 4., alt = 90., az=0., time = None, radio_array=None):
     '''Generate a datapack suitable for testing purposes, if time is None then use current time. The phase is randomly distributed.'''
