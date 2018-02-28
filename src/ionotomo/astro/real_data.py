@@ -483,13 +483,15 @@ class DataPack(object):
 
             # create antenna dataset
             f['/sol000/antenna'] = \
-                    [(label.encode(), loc.transform_to(ac.ITRS).cartesian.xzy.to(au.m).value) \
-                    for label, loc in zip(self.antenna_labels, self.antennas)]
+                    np.array([(label.encode(), loc.transform_to(ac.ITRS).cartesian.xyz.to(au.m).value) \
+                    for label, loc in zip(self.antenna_labels, self.antennas)], 
+                    dtype=[('name','S16'),('position','<f4',(3,))])
 
             # create source dataset
             f['/sol000/source'] = \
-                    [(patch.encode(), [d.ra.rad, d.dec.rad]) \
-                    for patch, d in zip(self.patch_names,self.directions)]
+                    np.array([(patch.encode(), [d.ra.rad, d.dec.rad]) \
+                    for patch, d in zip(self.patch_names,self.directions)],
+                    dtype = [('name','S128'),('dir','<f4',(2,))])
             if 'phase' in tabs:
                 f['/sol000/phase000/ant'] = np.array([label.encode() for label in self.antenna_labels])
                 f['/sol000/phase000/dir'] = np.array([patch.encode() for patch in self.patch_names])
