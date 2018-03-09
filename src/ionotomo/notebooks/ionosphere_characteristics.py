@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[ ]:
+# In[7]:
 
 import astropy.coordinates as ac
 import astropy.time as at
@@ -14,6 +14,7 @@ import gpflow as gpf
 import pymc3 as pm
 import os
 import pylab as plt
+import seaborn as sns
 
 ###
 # Create radio array
@@ -102,7 +103,7 @@ def simulate_screen(sim,datapack,s=1.01,ls=10.,draw_new=False):
     datapack.set_phase(phase,ant_idx=-1,time_idx=[0],dir_idx=-1,freq_idx=-1)
     return tec
             
-def log_posterior_true(tec,X1, tec_obs, X0):
+def log_posterior_true(tec,X1, tec_obs, X0,samples=1000):
     """
     Calculate the logp of the true underlying.
     tec : array (Nd1,)
@@ -121,10 +122,14 @@ def log_posterior_true(tec,X1, tec_obs, X0):
         y0_ = gp.marginal_likelihood('y0',X0,tec_obs,eps)
         mp = pm.find_MAP()
         print(mp)
-        trace = pm.sample(10000,start={'sigma':0.25,'l':0.25},chains=4)
+        trace = pm.sample(samples,start={'sigma':0.25,'l':0.25},chains=4)
         pm.traceplot(trace,combined=True)
         plt.show()
     print(pm.summary(trace))
+    
+    df = pm.trace_to_dataframe(trace, varnames=['sigma','l','eps'])
+    sns.pairplot(df)
+    plt.show()
 
     with model:
         y1_ = gp.conditional('y1',X1)#,given={'X':X0,'y':y0,'noise':0.1})
@@ -137,23 +142,28 @@ def log_posterior_true(tec,X1, tec_obs, X0):
     
     return logp_val
 
-logp = {}
+
+tec = simulate_screen(sim,datapack_screen,draw_new=True)
 d_mask = np.random.choice(Nd2,size=Nd1,replace=False)
-for i in range(10):
-    tec = simulate_screen(sim,datapack_screen,draw_new=True)
-    logp[i] = []
-    for ai in range(1,62):
-        print(antenna_labels[ai])
-        tec_mean = np.mean(tec[ai,0,:])
-        tec_std = np.std(tec[ai,0,:])
-        tec_ = (tec[ai,0,:] - tec_mean) / tec_std
-        logp[i].append(np.mean(log_posterior_true(tec_,X1,tec_[d_mask],X1[d_mask,:])))
+logp = log_posterior_true(tec[51,0,:],X1,tec[51,0,d_mask],X1[d_mask,:])
+# logp = {}
+# d_mask = np.random.choice(Nd2,size=Nd1,replace=False)
+# for i in range(10):
+#     tec = simulate_screen(sim,datapack_screen,draw_new=True)
+#     logp[i] = []
+#     for ai in range(1,62):
+#         print(antenna_labels[ai])
+#         tec_mean = np.mean(tec[ai,0,:])
+#         tec_std = np.std(tec[ai,0,:])
+#         tec_ = (tec[ai,0,:] - tec_mean) / tec_std
+#         logp[i].append(np.mean(log_posterior_true(tec_,X1,tec_[d_mask],X1[d_mask,:])))
     
 
 
-# In[7]:
+# In[6]:
 
-logp
+
+np.max(logp)
 
 
 # In[5]:

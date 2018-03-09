@@ -191,7 +191,7 @@ def animate_tci_slices(TCI,output_folder,num_seconds=10.):
     make_animation(output_folder,prefix='fig',fps=int(TCI.nz/float(num_seconds)))        
 
   
-def plot_datapack(datapack,ant_idx=-1,time_idx=[0], dir_idx=-1,freq_idx=-1,figname=None,vmin=None,vmax=None,mode='perantenna',observable='phase',phase_wrap=True,res_N = 25, plot_crosses=True):
+def plot_datapack(datapack,ant_idx=-1,time_idx=[0], dir_idx=-1,freq_idx=-1,figname=None,vmin=None,vmax=None,mode='perantenna',observable='phase',phase_wrap=True,res_N = 25, plot_crosses=True,plot_facet_idx=False):
     '''Plot phase at central frequency'''
     assert datapack.ref_ant is not None, "set DataPack ref_ant first"
     if len(time_idx) == 1 and figname is not None:
@@ -222,7 +222,7 @@ def plot_datapack(datapack,ant_idx=-1,time_idx=[0], dir_idx=-1,freq_idx=-1,figna
     if phase_wrap:
         obs = np.angle(np.exp(1j*obs))
         vmin = -np.pi
-        vmax = np.p
+        vmax = np.pi
         cmap = phase_cmap
     else:
         vmin = vmin or np.percentile(obs.flatten(), 2.5)
@@ -287,6 +287,10 @@ def plot_datapack(datapack,ant_idx=-1,time_idx=[0], dir_idx=-1,freq_idx=-1,figna
                 if plot_crosses:
                     sc1 = ax.scatter(dirs_uvw.u.value*factor300,dirs_uvw.v.value*factor300, c='black',
                                     marker='+')
+                else:
+                    if plot_facet_idx:
+                        [ax.annotate(str(k),xy=((dirs_uvw.u.value*factor300)[k],(dirs_uvw.v[k].value*factor300)[k]),xycoords='data') for k in range(Nd)]
+
                 i += 1
             #plt.tight_layout()
             fig.subplots_adjust(right=0.8)

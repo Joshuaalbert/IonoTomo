@@ -1110,7 +1110,7 @@ def _predict(Y,error,data_mask, pargs, X,lengthscales, variances, y_mean,y_scale
         error_scale = np.nanmean(np.abs(Y))*0.1/(np.nanmean(error)+1e-6)
         Y -= y_mean
         Y /= y_scale
-        var = (error_scale*error/y_scale)**2
+        var = (error/y_scale)**2
         var[data_mask] = 100.
         graph = graph or tf.Graph()
         #gp.reset_default_session(graph=graph)
@@ -1489,6 +1489,7 @@ if __name__=='__main__':
     if len(sys.argv) == 2:
         starting_datapack = sys.argv[1]
     else:
+<<<<<<< Updated upstream
         starting_datapack = "../data/rvw_datapack_dd_phase_dec27_SB200-219.hdf5"
 #    unwrap_script(starting_datapack,None,#starting_datapack.replace('.hdf5','_unwrap.hdf5'),
 #                 ant_idx=[51],time_idx=-1,freq_idx=-1)
@@ -1500,6 +1501,6 @@ if __name__=='__main__':
 #    param_file = 'param_file_{}_{}'.format(ant_idx[0],ant_idx[-1])
 #
 #    smooth_script(new_file,new_file, param_file=param_file, ant_idx=ant_idx, time_idx=-1, freq_idx=-1, learn_block_size=100, infer_block_size=30)
-    async_smooth_script('unwrap_smooth_output_scaled_error', starting_datapack, ant_per_process=1, ant_idx=-1, time_idx=-1, freq_idx=-1, learn_block_size=128, infer_block_size=64, verbose=True, num_processes=8,num_threads=8)
+    async_smooth_script('unwrap_smooth_output', starting_datapack, ant_per_process=1, ant_idx=-1, time_idx=-1, freq_idx=-1, learn_block_size=128, infer_block_size=64, verbose=True, num_processes=8,num_threads=8)
 #     animate_datapack("../data/rvw_datapack_full_phase_dec27_smooth_v2_bayes_ex.hdf5",freq_idx=[10])
 
