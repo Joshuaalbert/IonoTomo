@@ -26,3 +26,4 @@ from .ionosphere.iri import a_priori_model
 from .utils.timer import clock
 
 from .plotting.plot_tools import plot_datapack
+from .plotting.plot_datapack import animate_datapack, DatapackPlotter 

@@ -29,7 +29,7 @@ class DatapackPlotter(object):
             datapack = DataPack(filename=datapack)
         self.datapack = datapack
         assert self.datapack.ref_ant is not None, "set DataPack ref_ant first"
-
+    
     def _create_polygon_plot(self,points, values=None, N = None,ax=None,cmap=plt.cm.bone,overlay_points=True,title=None,polygon_labels=None,reverse_x=False):
         # get nearest points (without odd voronoi extra regions)
         k = cKDTree(points)
@@ -78,8 +78,45 @@ class DatapackPlotter(object):
 #    alpha=0.1,facecolor='red',label='Label'))
 #            ax.annotate(title,xy=(0.8,0.8),xycoords='axes fraction')
         return ax, p
+    
+    def _create_image_plot(self,points, values=None, N = None,ax=None,cmap=plt.cm.bone,overlay_points=True,title=None,polygon_labels=None,reverse_x=False):
+        '''
+        Create initial plot, with image data instead of polygons.
+        points: the locations of values, if values is None assume points are squared.
+        values: array [n, m] or None, assumes (dec, ra) ordering ie (y,x)
+        '''
+        dx = np.max(points[:,0]) - np.min(points[:,0])
+        dy = np.max(points[:,1]) - np.min(points[:,1])
+        if values is not None:
+            n,m = values.shape
+        else:
+            n=m=int(np.sqrt(points.shape[0]))
+            assert n**2 == points.shape[0]
+        if ax is None:
+            fig,ax = plt.subplots()
+            print("Making new plot")
+        if values is None:
+            values = np.zeros([n,m])
+        x = np.linspace(np.min(points[:,0]),np.max(points[:,0]),m)
+        y = np.linspace(np.min(points[:,1]),np.max(points[:,1]),n)
+        img = ax.imshow(values,origin='lower',extent=(x[0],x[-1],y[0],y[-1]))
+        if overlay_points:
+            ax.scatter(points[:,0],points[:,1],marker='+',c='black')
+        if reverse_x:
+            ax.set_xlim([np.max(points_i[:,0]),np.min(points_i[:,0])])
+        else:
+            ax.set_xlim([np.min(points_i[:,0]),np.max(points_i[:,0])])
+        ax.set_ylim([np.min(points_i[:,1]),np.max(points_i[:,1])])
+        ax.set_facecolor('black')
+        if title is not None:
+            if reverse_x:
+                ax.text(np.max(points[:,0])-0.05*dx,np.max(points[:,1])-0.05*dy,title,ha='left',va='top',backgroundcolor=(1.,1.,1., 0.5))
+            else:
+                ax.text(np.min(points[:,0])+0.05*dx,np.max(points[:,1])-0.05*dy,title,ha='left',va='top',backgroundcolor=(1.,1.,1., 0.5))
+        return ax, img
 
-    def plot(self, ant_idx=-1, time_idx = [0], dir_idx=-1, freq_idx=[0], fignames=None, vmin=None,vmax=None,mode='perantenna',observable='phase',phase_wrap=True, plot_crosses=True,plot_facet_idx=False,plot_patchnames=False,labels_in_radec=False,show=False):
+
+    def plot(self, ant_idx=-1, time_idx = [0], dir_idx=-1, freq_idx=[0], fignames=None, vmin=None,vmax=None,mode='perantenna',observable='phase',phase_wrap=True, plot_crosses=True,plot_facet_idx=False,plot_patchnames=False,labels_in_radec=False,show=False, plot_arrays=False):
         """
         Plot datapack with given parameters.
         """
@@ -204,8 +241,9 @@ class DatapackPlotter(object):
                 fig.canvas.draw()
                 if save_fig:
                     plt.savefig(fignames[j])
+
             if show:
-                plt.close(fig)
+#                plt.close(fig)
                 plt.ioff()
 
 def _parallel_plot(arg):
@@ -216,6 +254,13 @@ def _parallel_plot(arg):
     return fignames
     
 def animate_datapack(datapack,output_folder,num_processes=1,**kwargs):
+    """
+    Plot the datapack in parallel, then stitch into movie.
+    datapack: str the datapack filename
+    output_folder: str, folder to store figs in
+    num_processes: int number of parallel plotting processes to run
+    **kwargs: keywords to pass to DatapackPlotter.plot function.
+    """
     try:
         os.makedirs(output_folder)
     except:
@@ -229,8 +274,9 @@ def animate_datapack(datapack,output_folder,num_processes=1,**kwargs):
     with futures.ProcessPoolExecutor(max_workers=num_processes) as executor:
         jobs = executor.map(_parallel_plot,args)
         results = list(jobs)
+    make_animation(output_folder,prefix='fig',fps=4)
 
-def make_animation(datafolder,prefix='fig',fps=3):
+def make_animation(datafolder,prefix='fig',fps=4):
     '''Given a datafolder with figures of format `prefix`-%04d.png create a 
     video at framerate `fps`.
     Output is datafolder/animation.mp4'''
@@ -303,10 +349,11 @@ def test_nearest():
     plt.show()
 
 def test():
-    #from ionotomo.astro.real_data import generate_example_datapack
-    #datapack = generate_example_datapack(Ndir=10,Nant=10,Ntime=20)
-    #dp = DatapackPlotter(datapack='../data/rvw_datapack_full_phase_dec27_smooth.hdf5')
-    #dp.plot(ant_idx=-1,dir_idx=-1,time_idx=-1,labels_in_radec=True)
+    from ionotomo.astro.real_data import generate_example_datapack
+    datapack = generate_example_datapack(Ndir=10,Nant=10,Ntime=20)
+    datapack.phase = np.random.uniform(size=datapack.phase.shape)
+    dp = DatapackPlotter(datapack='../data/rvw_datapack_full_phase_dec27_smooth.hdf5')
+    dp.plot(ant_idx=-1,dir_idx=-1,time_idx=[0],labels_in_radec=True,show=True)
 
     animate_datapack('../data/rvw_datapack_full_phase_dec27_smooth.hdf5',
             'test_output',num_processes=1,observable='phase',labels_in_radec=True,show=True)
