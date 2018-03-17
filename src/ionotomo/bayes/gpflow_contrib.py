@@ -14,15 +14,15 @@ from gpflow.likelihoods import Likelihood
 from gpflow.models import GPModel
 
 class Gaussian_v2(Likelihood):
-    def __init__(self, var=1.0, trainable=True):
+    def __init__(self, Y_var=None,var=1.0, trainable=True):
         super().__init__()
         self.variance = Parameter(
                 var, transform=transforms.positive, dtype=settings.float_type, trainable=trainable)
         
-#        if Y_var is None:
-#            self.relative_variance = 1.0
-#        else:
-#            self.relative_variance = Y_var
+        if Y_var is None:
+            self.relative_variance = 1.0
+        else:
+            self.relative_variance = Y_var
 
     @params_as_tensors
     def logp(self, F, Y):
@@ -225,9 +225,72 @@ def test():
     plt.fill_between(X[:,0],y[:,0]+np.sqrt(var[:,0]),y[:,0] - np.sqrt(var[:,0]),alpha=0.25)
     plt.show()
 
+def test_svgp():
+    from gpflow.kernels import RBF, White
+    from gpflow.models.svgp import SVGP
+    from gpflow.training import AdamOptimizer
 
+    from scipy.stats import mode
+    from scipy.cluster.vq import kmeans2
+
+    import gpflow as gp
+    import pylab as plt
+    plt.style.use('ggplot')
+
+    np.random.seed(0)
+    X = np.linspace(0,1,10000)[:,None]
+    sigma_y = np.random.uniform(size=10000)*0.5
+    #sigma_y[sigma_y < 0.5] = 0.01
+    #sigma_y = 0.5*np.ones([100])
+    #sigma_y[50:] = 0.
+    F = np.exp(-X)*np.sin(50*X) + X**2*np.sin(10*X)
+    Y = F + sigma_y[:,None]*np.random.normal(size=X.shape)
+
+    k = gp.kernels.RBF(1,lengthscales=[0.1])#*gp.kernels.Periodic(1)
+    kern = k
+    mean = gp.mean_functions.Zero()
+
+    M = 100
+    Z = kmeans2(X, M, minit='points')[0]
+    with gp.defer_build():
+        m_sgp = SVGP(X, Y, RBF(1, lengthscales=0.05, variance=1.)*gp.kernels.Periodic(1), Gaussian_v2(Y_var=sigma_y**2, trainable=False), 
+             Z=Z, num_latent=1, minibatch_size=100, whiten=True)
+        m_sgp.feature.set_trainable(False)
+        #m_sgp.kern.lengthscales.prior = gp.priors.Gaussian(0,0.3)
+        m_sgp.compile()
+    iterations = 1000
+    AdamOptimizer(0.1).minimize(m_sgp, maxiter=iterationsy)
+
+    def assess_model_sgp(model, X_batch, Y_batch):
+        m, v = model.predict_y(X_batch)
+        l = model.predict_density(X_batch, Y_batch)
+        a = np.abs(m.reshape(Y_batch.shape) - Y_batch).mean()
+        return l, a
+
+    def batch_assess(model, assess_model, X, Y,minibatch_size=100):
+        n_batches = max(int(len(X)/minibatch_size), 1)
+        lik, acc = [], []
+        for X_batch, Y_batch in zip(np.split(X, n_batches), np.split(Y, n_batches)):
+            l, a = assess_model(model, X_batch, Y_batch)
+            lik.append(l)
+            acc.append(a)
+#        lik = np.concatenate(lik, 0)
+#        acc = np.array(np.concatenate(acc, 0), dtype=float)
+        return np.average(lik), np.average(acc)
     
+#    l,a = batch_assess(m_sgp, assess_model_sgp, X, Y, 100)
+#    print("Likelihood: {}, MAE: {}".format(l,a))
+    print(m_sgp)
 
+    Xs = np.linspace(0,1,100)[:,None]
+    m, v = m_sgp.predict_y(Xs)
+    plt.scatter(X[:,0],Y[:,0],alpha=0.1)
+    plt.plot(Xs,m[:,0])
+    plt.fill_between(Xs[:,0],m[:,0] + np.sqrt(v)[:,0],m[:,0] - np.sqrt(v)[:,0],alpha=0.3)
+    plt.plot(m_sgp.feature.Z.value, np.zeros(m_sgp.feature.Z.value.shape),'k|',mew=2)
+    plt.plot(Z, np.zeros(Z.shape),'g|',mew=2)
+
+    plt.show()
     
 if __name__=='__main__':
-    test()
+    test_svgp()

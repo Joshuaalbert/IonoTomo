@@ -22,7 +22,8 @@ import astropy.units as au
 import astropy.time as at
 from collections import deque
 
-from ionotomo.bayes.gpflow_contrib import GPR_v2
+from ionotomo.bayes.gpflow_contrib import GPR_v2,Gaussian_v2
+from scipy.cluster.vq import kmeans2
 
 
 
@@ -45,18 +46,19 @@ class Smoothing(object):
             for k in range(Nd):
                 for l in range(Nf):
                     X[j,k,l,0:2] = d[k,:]
-                    X[j,k,l,0] = t[j]   
+                    X[j,k,l,2] = t[j]   
                     X[j,k,l,3] = f[l]
         X = np.reshape(X,(Nt*Nd*Nf,4))
         return X
 
-    def _solve_block(phase, error, coords, lock, pargs=None,verbose=False, solver = 'gpflow'):
+    def _solve_block_svgp(phase, error, coords, lock, init=(0.1,0.2,10.),pargs=None,verbose=False):
         try:
             if verbose:
                 logging.warning("{}".format(pargs))
             error_scale = np.mean(np.abs(phase))*0.1/np.mean(error)
             if verbose:
                 logging.warning("Error scaling {}".format(error_scale))
+
             y_mean = np.mean(phase)
             y_scale = np.std(phase) + 1e-6
             y = (phase - y_mean)/y_scale
@@ -66,10 +68,78 @@ class Smoothing(object):
             
             t,d,f = coords
             t_scale = np.max(t) - np.min(t) + 1e-6
-            d_scale = np.std(d) + 1e-6
+            d_scale = np.std(d - np.mean(d,axis=0)) + 1e-6
             f_scale = np.max(f) - np.min(f) + 1e-6
             t = (t - np.mean(t))/(t_scale+1e-6)
-            d = (d - np.mean(d))/(d_scale+1e-6)
+            d = (d - np.mean(d,axis=0))/(d_scale+1e-6)
+            f = (f - np.mean(f))/(f_scale+1e-6)
+            X = Smoothing._make_coord_array(t,d,f)
+
+            M = 50
+            Z = kmeans2(X, M, minit='points')[0]
+
+            with tf.Session(graph=tf.Graph()) as sess:
+                lock.acquire()
+                try:
+                    with gp.defer_build():
+                        k_space = gp.kernels.RBF(2,active_dims = [0,1],lengthscales=[init[0]])
+                        k_time = gp.kernels.RBF(1,active_dims = [2],lengthscales=[init[1]])
+                        k_freq = gp.kernels.RBF(1,active_dims = [3], lengthscales=[init[2]])
+                        
+                        #k_white = gp.kernels.White(4)
+                        kern = k_space * k_time * k_freq# + k_white
+                        mean = gp.mean_functions.Zero()#Constant()
+
+                        m = gp.models.svgp.SVGP(X, y, kern, mean_function = mean, 
+                                likelihood=Gaussian_v2(Y_var=var, trainable=False), 
+                                Z=Z, num_latent=1, minibatch_size=100, whiten=True)
+                        m.feature.set_trainable(False)
+                        m.kern.rbf_1.lengthscales.prior = gp.priors.Gaussian(1./d_scale,0.5/d_scale)
+                        m.kern.rbf_2.lengthscales.prior = gp.priors.Gaussian(0,1./3.)
+                        m.kern.rbf_3.lengthscales.set_trainable(False)
+                        m.compile()
+                finally:
+                    lock.release()
+                iterations=150
+                gp.train.AdamOptimizer(0.1).minimize(m, maxiter=iterations)
+                
+                if verbose:
+                    logging.warning(m)
+                kern_lengthscales = (
+                        m.kern.rbf_1.lengthscales.value[0]*d_scale,
+                        m.kern.rbf_2.lengthscales.value[0]*t_scale,
+                        m.kern.rbf_3.lengthscales.value[0]*f_scale
+                        )
+                kern_variance = m.kern.rbf_1.variance.value*m.kern.rbf_2.variance.value*m.kern.rbf_3.variance.value*y_scale**2
+                if verbose:
+                    logging.warning(kern_lengthscales)
+                    logging.warning(kern_variance)
+                return kern_lengthscales, kern_variance
+        except Exception as e:
+            print(e)
+
+
+    def _solve_block(phase, error, coords, lock, pargs=None,verbose=False):
+        try:
+            if verbose:
+                logging.warning("{}".format(pargs))
+            error_scale = np.mean(np.abs(phase))*0.1/np.mean(error)
+            if verbose:
+                logging.warning("Error scaling {}".format(error_scale))
+
+            y_mean = np.mean(phase)
+            y_scale = np.std(phase) + 1e-6
+            y = (phase - y_mean)/y_scale
+            y = y.flatten()[:,None]
+            var = (error/y_scale*error_scale)**2
+            var = var.flatten()
+            
+            t,d,f = coords
+            t_scale = np.max(t) - np.min(t) + 1e-6
+            d_scale = np.std(d - np.mean(d,axis=0)) + 1e-6
+            f_scale = np.max(f) - np.min(f) + 1e-6
+            t = (t - np.mean(t))/(t_scale+1e-6)
+            d = (d - np.mean(d,axis=0))/(d_scale+1e-6)
             f = (f - np.mean(f))/(f_scale+1e-6)
             X = Smoothing._make_coord_array(t,d,f)
 
@@ -106,11 +176,11 @@ class Smoothing(object):
                 with sess.as_default():
                     marginal_log_likelihood = [m.objective.eval()]
                     for i in range(3):
-                        o.minimize(m,maxiter=3)
-                        marginal_log_likelihood.append(m.objective.eval())
-                        print(marginal_log_likelihood[-1])
-                    plt.plot(marginal_log_likelihood)
-                    plt.show()
+                        o.minimize(m,maxiter=4)
+                        #marginal_log_likelihood.append(m.objective.eval())
+                        #print(marginal_log_likelihood[-1])
+                    #plt.plot(marginal_log_likelihood)
+                    #plt.show()
 
                 if verbose:
                     logging.warning(m)
@@ -127,11 +197,11 @@ class Smoothing(object):
         except Exception as e:
             print(e)
 
-    def _ref_distance(self,uvw,antennas,i0=0):
-        ants_uvw = antennas.transform_to(uvw)
-        u = ants_uvw.u.to(au.km).value
-        v = ants_uvw.v.to(au.km).value
-        dist = np.sqrt((u - u[i0])**2 + (v - v[i0])**2)
+    def _ref_distance(self,antennas,i0=0):
+        x = antennas.x.to(au.km).value
+        y = antennas.y.to(au.km).value
+        z = antennas.z.to(au.km).value
+        dist = np.sqrt((x-x[i0])**2 + (y-y[i0])**2 + (z-z[i0])**2)
         return dist
 
     def solve_time_intervals(self, save_file, ant_idx, time_idx, dir_idx, freq_idx, interval, shift, num_threads=1,verbose=False):
@@ -176,8 +246,9 @@ class Smoothing(object):
               phase=datapack.get_center_direction())
         dirs_uvw = directions.transform_to(uvw)
         #already centered on zero
-        d = np.array([np.arctan2(dirs_uvw.u.value, dirs_uvw.w.value),
-                     np.arctan2(dirs_uvw.v.value, dirs_uvw.w.value)]).T
+#        d = np.array([np.arctan2(dirs_uvw.u.value, dirs_uvw.w.value),
+#                     np.arctan2(dirs_uvw.v.value, dirs_uvw.w.value)]).T
+        d = np.array([directions.ra.deg, directions.dec.deg]).T
         t = times.gps
         f = freqs
         directional_sampling = 1
@@ -198,7 +269,7 @@ class Smoothing(object):
                     time_slice = slice(start,stop,time_sampling)
                     
                     jobs.append(executor.submit(
-                        Smoothing._solve_block,
+                        Smoothing._solve_block_svgp,
                         phase[i,time_slice,directional_slice,freq_slice],
                         error[i,time_slice,directional_slice,freq_slice],
                         (t[time_slice],d[directional_slice],f[freq_slice]),
@@ -213,9 +284,6 @@ class Smoothing(object):
                 start = j*shift
                 stop = min(start+interval,Nt)
                 ref_dist.append(self._ref_distance(
-                        UVW(location=datapack.radio_array.get_center(), 
-                            obstime=times[(start+stop)//2],
-                            phase=datapack.get_center_direction()),
                         antennas, i0=0))
             ref_dist = np.stack(ref_dist,axis=0)
             results = futures.wait(jobs)
@@ -248,4 +316,4 @@ if __name__=='__main__':
     else:
         starting_datapack = "../data/rvw_datapack_full_phase_dec27_unwrap.hdf5"
     smoothing = Smoothing(starting_datapack)
-    smoothing.solve_time_intervals("gp_params.npz",[50],range(64),-1,range(0,20),32,32,num_threads=1,verbose=True)
+    smoothing.solve_time_intervals("gp_params.npz",range(1,62),-1,-1,range(0,20),32,32,num_threads=16,verbose=True)
