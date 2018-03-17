@@ -9,6 +9,8 @@ from ionotomo.tomography.pipeline import Pipeline
 from ionotomo.settings import TFSettings
 from timeit import default_timer
 from ionotomo import *
+import astropy.coordinates as ac
+import astropy.units as au
 import gpflow as gp
 import sys
 import h5py
@@ -50,6 +52,7 @@ class Smoothing(object):
                     X[j,k,l,3] = f[l]
         X = np.reshape(X,(Nt*Nd*Nf,4))
         return X
+
 
     def _solve_block_svgp(phase, error, coords, lock, init=(0.1,0.2,10.),pargs=None,verbose=False):
         try:
@@ -204,6 +207,239 @@ class Smoothing(object):
         dist = np.sqrt((x-x[i0])**2 + (y-y[i0])**2 + (z-z[i0])**2)
         return dist
 
+    def refine_statistics_timeonly(self,results_file):
+        antennas,antenna_labels = self.datapack.get_antennas(-1)
+        data = np.load(results_file)
+        length_scales = data['kern_ls']
+        length_scales -= length_scales.mean(0).mean(0)
+        length_scales /= length_scales.std(0).std(0)
+        var_scale = data['kern_var']
+        times = data['time']
+        times -= times.mean()
+        times /= times.std()
+        labels = data['antenna']
+        array_center = ac.ITRS(np.mean(antennas.data))
+        enu = ENU(location = array_center)
+        ants_enu = antennas.transform_to(enu)
+        positions = np.array([ants_enu.east.to(au.km).value[1:], ants_enu.north.to(au.km).value[1:]]).T
+        positions -= positions.mean(0)
+        positions /= positions.std(0).mean()
+
+        Nt,Np = times.shape[0],positions.shape[0]
+        X = np.zeros([Nt,Np,1],dtype=np.float64)
+        for j in range(Nt):
+            for k in range(Np):
+                X[j,k,0] = times[j]
+             #   X[j,k,1:3] = positions[k,:]   
+        X = np.reshape(X,(Nt*Np,1))
+        Y = length_scales[:,:,0:1].transpose([1,0,2]).reshape((-1,1))
+
+        M = 100
+        Z = kmeans2(X, M, minit='points')[0]
+
+        with tf.Session(graph=tf.Graph()) as sess:
+            with gp.defer_build():
+                #k_space = gp.kernels.RBF(2,active_dims = [1,2],lengthscales=[0.5])
+                k_time = gp.kernels.RBF(1,active_dims = [0],lengthscales=[0.5])
+                k_white = gp.kernels.White(1,variance=1e-5)
+                kern = k_time  + k_white
+                mean = gp.mean_functions.Constant()
+
+                m = gp.models.svgp.SVGP(X, Y, kern, mean_function = mean, 
+                        likelihood=gp.likelihoods.Gaussian(), 
+                        Z=Z, num_latent=1, minibatch_size=500, whiten=True)
+                m.feature.set_trainable(False)
+                k_time.lengthscales.prior = gp.priors.Gaussian(0,1/3.)
+                m.compile()
+            iterations=1000
+            gp.train.AdamOptimizer(0.01).minimize(m, maxiter=iterations)
+            print(m)
+            xi = np.linspace(np.min(positions),np.max(positions),100)
+            yi = np.linspace(np.min(positions),np.max(positions),100)
+            y,var = m.predict_y(X)
+            y = y.reshape((Nt,Np,1))
+            std = np.sqrt(var.reshape((Nt,Np,1)))
+            fig,(ax1,ax2) = plt.subplots(nrows=1,ncols=2)
+            [ax1.plot(times,y[:,i,0]) for i in range(y.shape[1])]
+            ax1.plot(times,length_scales[:,:,0].mean(0),lw=2,c='black')
+            ax1.fill_between(times,y[:,0,0]
+            ax1.fill_between(times,length_scales[:,:,0].mean(0)+length_scales[:,:,0].std(0),length_scales[:,:,0].mean(0)-length_scales[:,:,0].std(0),alpha=0.25)
+            [ax2.plot(times,length_scales[i,:,0]) for i in range(y.shape[1])]
+            plt.show()
+
+        Y = length_scales[:,:,1:2].transpose([1,0,2]).reshape((-1,1))
+
+        M = 100
+        Z = kmeans2(X, M, minit='points')[0]
+
+        with tf.Session(graph=tf.Graph()) as sess:
+            with gp.defer_build():
+                k_time = gp.kernels.RBF(1,active_dims = [0],lengthscales=[0.5])
+                k_white = gp.kernels.White(1,variance=1e-5)
+                kern = k_time  + k_white
+                mean = gp.mean_functions.Constant()
+
+                m = gp.models.svgp.SVGP(X, Y, kern, mean_function = mean, 
+                        likelihood=gp.likelihoods.Gaussian(), 
+                        Z=Z, num_latent=1, minibatch_size=500, whiten=True)
+                m.feature.set_trainable(False)
+                k_time.lengthscales.prior = gp.priors.Gaussian(0,1/3.)
+                m.compile()
+            iterations=1000
+            gp.train.AdamOptimizer(0.01).minimize(m, maxiter=iterations)
+            print(m)
+            xi = np.linspace(np.min(positions),np.max(positions),100)
+            yi = np.linspace(np.min(positions),np.max(positions),100)
+            y,var = m.predict_y(X)
+            y = y.reshape((Nt,Np,1))
+            std = np.sqrt(var.reshape((Nt,Np,1)))
+            fig,(ax1,ax2) = plt.subplots(nrows=1,ncols=2)
+            [ax1.plot(times,y[:,i,0]) for i in range(y.shape[1])]
+            ax1.plot(times,length_scales[:,:,1].mean(0),lw=2,c='black')
+            ax1.fill_between(times,length_scales[:,:,1].mean(0)+length_scales[:,:,1].std(0),length_scales[:,:,1].mean(0)-length_scales[:,:,1].std(0),alpha=0.25)
+            [ax2.plot(times,length_scales[i,:,1]) for i in range(y.shape[1])]
+            plt.show()
+
+        return
+
+
+
+
+    def refine_statistics(self,results_file):
+        from scipy.interpolate import griddata        
+        #radio_array = RadioArray(array_file=RadioArray.lofar_array)
+        antennas,antenna_labels = self.datapack.get_antennas(-1)
+        data = np.load(results_file)
+        length_scales = data['kern_ls']
+        length_scales -= length_scales.mean(0).mean(0)
+        length_scales /= length_scales.std(0).std(0)
+        var_scale = data['kern_var']
+        times = data['time']
+        times -= times.mean()
+        times /= times.std()
+        labels = data['antenna']
+        array_center = ac.ITRS(np.mean(antennas.data))
+        enu = ENU(location = array_center)
+        ants_enu = antennas.transform_to(enu)
+        positions = np.array([ants_enu.east.to(au.km).value[1:], ants_enu.north.to(au.km).value[1:]]).T
+        positions -= positions.mean(0)
+        positions /= positions.std(0).mean()
+
+        Nt,Np = times.shape[0],positions.shape[0]
+        X = np.zeros([Nt,Np,3],dtype=np.float64)
+        for j in range(Nt):
+            for k in range(Np):
+                X[j,k,0] = times[j]
+                X[j,k,1:3] = positions[k,:]   
+        X = np.reshape(X,(Nt*Np,3))
+        Y = length_scales[:,:,0:1].transpose([1,0,2]).reshape((-1,1))
+
+        M = 100
+        Z = kmeans2(X, M, minit='points')[0]
+
+        with tf.Session(graph=tf.Graph()) as sess:
+            with gp.defer_build():
+                k_space = gp.kernels.RBF(2,active_dims = [1,2],lengthscales=[0.5])
+                k_time = gp.kernels.RBF(1,active_dims = [0],lengthscales=[0.5])
+                k_white = gp.kernels.White(3,variance=1e-5)
+                kern = k_time * k_space + k_white
+                mean = gp.mean_functions.Constant()
+
+                m = gp.models.svgp.SVGP(X, Y, kern, mean_function = mean, 
+                        likelihood=gp.likelihoods.Gaussian(), 
+                        Z=Z, num_latent=1, minibatch_size=500, whiten=True)
+                m.feature.set_trainable(False)
+                k_space.lengthscales.prior = gp.priors.Gaussian(0,1./3.)
+                k_time.lengthscales.prior = gp.priors.Gaussian(0,1/3.)
+                m.compile()
+            iterations=1000
+            gp.train.AdamOptimizer(0.01).minimize(m, maxiter=iterations)
+            print(m)
+            xi = np.linspace(np.min(positions),np.max(positions),100)
+            yi = np.linspace(np.min(positions),np.max(positions),100)
+            y,var = m.predict_y(X)
+            y = y.reshape((Nt,Np,1))
+            std = np.sqrt(var.reshape((Nt,Np,1)))
+            fig,(ax1,ax2) = plt.subplots(nrows=1,ncols=2)
+            [ax1.plot(times,y[:,i,0]) for i in range(y.shape[1])]
+            ax1.plot(times,length_scales[:,:,0].mean(0),lw=2,c='black')
+            ax1.fill_between(times,length_scales[:,:,0].mean(0)+length_scales[:,:,0].std(0),length_scales[:,:,0].mean(0)-length_scales[:,:,0].std(0),alpha=0.25)
+            [ax2.plot(times,length_scales[i,:,0]) for i in range(y.shape[1])]
+            plt.show()
+
+        Y = length_scales[:,:,1:2].transpose([1,0,2]).reshape((-1,1))
+
+        M = 100
+        Z = kmeans2(X, M, minit='points')[0]
+
+        with tf.Session(graph=tf.Graph()) as sess:
+            with gp.defer_build():
+                k_space = gp.kernels.RBF(2,active_dims = [1,2],lengthscales=[0.5])
+                k_time = gp.kernels.RBF(1,active_dims = [0],lengthscales=[0.5])
+                k_white = gp.kernels.White(3,variance=1e-5)
+                kern = k_time * k_space + k_white
+                mean = gp.mean_functions.Constant()
+
+                m = gp.models.svgp.SVGP(X, Y, kern, mean_function = mean, 
+                        likelihood=gp.likelihoods.Gaussian(), 
+                        Z=Z, num_latent=1, minibatch_size=500, whiten=True)
+                m.feature.set_trainable(False)
+                k_space.lengthscales.prior = gp.priors.Gaussian(0,1./3.)
+                k_time.lengthscales.prior = gp.priors.Gaussian(0,1/3.)
+                m.compile()
+            iterations=1000
+            gp.train.AdamOptimizer(0.01).minimize(m, maxiter=iterations)
+            print(m)
+            xi = np.linspace(np.min(positions),np.max(positions),100)
+            yi = np.linspace(np.min(positions),np.max(positions),100)
+            y,var = m.predict_y(X)
+            y = y.reshape((Nt,Np,1))
+            std = np.sqrt(var.reshape((Nt,Np,1)))
+            fig,(ax1,ax2) = plt.subplots(nrows=1,ncols=2)
+            [ax1.plot(times,y[:,i,0]) for i in range(y.shape[1])]
+            ax1.plot(times,length_scales[:,:,1].mean(0),lw=2,c='black')
+            ax1.fill_between(times,length_scales[:,:,1].mean(0)+length_scales[:,:,1].std(0),length_scales[:,:,1].mean(0)-length_scales[:,:,1].std(0),alpha=0.25)
+            [ax2.plot(times,length_scales[i,:,1]) for i in range(y.shape[1])]
+            plt.show()
+
+        return
+
+
+
+
+        
+        # grid the data.
+        zi = griddata((positions[:,0], positions[:,1]), np.log10(length_scales[:,0,0]), (xi[None,:], yi[:,None]), method='cubic')
+        plt.ion()
+        # contour the gridded data, plotting dots at the randomly spaced data points.
+        fig,ax = plt.subplots(1,1)
+        plt.show()
+        i = 0
+        vmin = np.min(length_scales[:,:,0])
+        vmax = np.max(length_scales[:,:,0])
+        set = False
+        while True:
+            idx = i % len(times)
+            zi = griddata((positions[:,0], positions[:,1]), (length_scales[:,idx,0]), (xi[None,:], yi[:,None]), method='nearest')
+            ax.cla()
+            CS1 = ax.contour(xi,yi,zi,15,linewidths=0.5,colors='k')
+            CS2 = ax.contourf(xi,yi,zi,15,cmap=plt.cm.jet,vmin=vmin,vmax=vmax)
+            if not set:
+                plt.colorbar(CS2) # draw colorbar
+                set = True
+            # plot data points.
+            plt.scatter(positions[:,0],positions[:,1],marker='o',c='b',s=5)
+            plt.title(times[idx])
+            fig.canvas.draw()
+            i += 1
+        plt.ioff()
+
+#        plt.xlim(-2,2)
+#        plt.ylim(-2,2)
+#        plt.title('griddata test (%d points)' % npts)
+        #plt.show()
+
+
     def solve_time_intervals(self, save_file, ant_idx, time_idx, dir_idx, freq_idx, interval, shift, num_threads=1,verbose=False):
         """
         Solve for kernel characteristics over given domain.
@@ -314,6 +550,7 @@ if __name__=='__main__':
     if len(sys.argv) == 2:
         starting_datapack = sys.argv[1]
     else:
-        starting_datapack = "../data/rvw_datapack_full_phase_dec27_unwrap.hdf5"
+        starting_datapack = "../data/rvw_datapack_full_phase_dec27.hdf5"
     smoothing = Smoothing(starting_datapack)
-    smoothing.solve_time_intervals("gp_params.npz",range(1,62),-1,-1,range(0,20),32,32,num_threads=16,verbose=True)
+    #smoothing.solve_time_intervals("gp_params.npz",range(1,62),-1,-1,range(0,20),32,32,num_threads=16,verbose=True)
+    smoothing.refine_statistics_timeonly('gp_params.npz')
