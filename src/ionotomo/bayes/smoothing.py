@@ -39,22 +39,68 @@ class Smoothing(object):
             datapack = DataPack(filename=datapack)
         self.datapack = datapack
 
-    def _make_coord_array(t,d,f):
-        """Static method to pack coordinates
-        """
-        Nt,Nd,Nf = t.shape[0],d.shape[0], f.shape[0]
-        X = np.zeros([Nt,Nd,Nf,4],dtype=np.float64)
-        for j in range(Nt):
-            for k in range(Nd):
-                for l in range(Nf):
-                    X[j,k,l,0:2] = d[k,:]
-                    X[j,k,l,2] = t[j]   
-                    X[j,k,l,3] = f[l]
-        X = np.reshape(X,(Nt*Nd*Nf,4))
-        return X
+#    def _make_coord_array(t,d,f):
+#        """Static method to pack coordinates
+#        """
+#        Nt,Nd,Nf = t.shape[0],d.shape[0], f.shape[0]
+#        X = np.zeros([Nt,Nd,Nf,4],dtype=np.float64)
+#        for j in range(Nt):
+#            for k in range(Nd):
+#                for l in range(Nf):
+#                    X[j,k,l,0:2] = d[k,:]
+#                    X[j,k,l,2] = t[j]   
+#                    X[j,k,l,3] = f[l]
+#        X = np.reshape(X,(Nt*Nd*Nf,4))
+#        return X
+
+    def _make_coord_array(*ars):
+        coords = np.meshgrid(*args,indexing='ij')
+        return np.stack([c.flatten() for c in coords],axis=1)
+
+    def _solve_svgp(coords, data, var=None, M = 100, minibatch_size=500, iterations=1000, ARD=True, lock = None):
+        assert len(coords) == len(data.shape)-1
+        num_latent = data.shape[-1]
+        data_mean = [data[...,i].mean() for i in range(num_latent)]
+        data_std = [data[...,i].std() for i in range(num_latent)]
+        data = np.stack([(data[...,i] - d_m)/d_s for i,(d_m,d_s) in enumerate(zip(data_mean,data_std))],axis=-1)
+        Y = data.reshape((-1,num_latent))
+        x_mean = [c.mean() for c in coords]
+        x_std = [c.std() for c in coords]
+        coords = [(c-c_m)/c_s for c,c_m,c_s in zip(coords, x_means,x_std)]
+
+        X = Smoothing._make_coords_array(*coords)
+        Z = kmeans2(X, M, minit='points')[0]
+
+        with tf.Session(graph=tf.Graph()) as sess:
+            if lock is not None:
+                lock.acquire()
+            try:
+                with gp.defer_build():
+                    kern = gp.kernels.RBF(len(coords),ARD=True)
+                    kern.lengthscales.prior = gp.priors.Gaussian(0.,1/3.)
+                    
+                    mean = gp.mean_functions.Constant()
+
+                    m = gp.models.svgp.SVGP(X, Y, kern, mean_function = mean, 
+                            likelihood=gp.likelihoods.Gaussian() if var is None else Gaussian_v2(Y_var=var, trainable=False), 
+                            Z=Z, num_latent=num_latent, minibatch_size=minibatch_size, whiten=True)
+                    m.feature.set_trainable(False)
+                    m.compile()
+            finally:
+                if lock is not None:
+                    lock.release()
+            gp.train.AdamOptimizer(0.01).minimize(m, maxiter=iterations)
+        
+            ystar,varstar = m.predict_y(X)
+            ystar = ystar.reshape(data.shape)
+            ystar = np.stack([ystar[...,i]*d_s + d_m for i,(d_m,d_s) in enumerate(zip(data_mean,data_std))],axis=-1)
+            varstar = varstar.reshape(data.shape)
+            varstar = np.stack([varstar[...,i]*d_s**2 for i,(d_m,d_s) in enumerate(zip(data_mean,data_std))],axis=-1)
+            return ystar, varstar
 
 
-    def _solve_block_svgp(phase, error, coords, lock, init=(0.1,0.2,10.),pargs=None,verbose=False):
+
+    def _solve_block_svgp(phase, error, coords, lock, init=(None,None),pargs=None,verbose=False):
         try:
             if verbose:
                 logging.warning("{}".format(pargs))
@@ -78,16 +124,25 @@ class Smoothing(object):
             f = (f - np.mean(f))/(f_scale+1e-6)
             X = Smoothing._make_coord_array(t,d,f)
 
-            M = 50
+            M = 100
             Z = kmeans2(X, M, minit='points')[0]
 
             with tf.Session(graph=tf.Graph()) as sess:
                 lock.acquire()
                 try:
                     with gp.defer_build():
-                        k_space = gp.kernels.RBF(2,active_dims = [0,1],lengthscales=[init[0]])
-                        k_time = gp.kernels.RBF(1,active_dims = [2],lengthscales=[init[1]])
-                        k_freq = gp.kernels.RBF(1,active_dims = [3], lengthscales=[init[2]])
+                        if init[0] is None:
+                            k_space = gp.kernels.RBF(2,active_dims = [0,1],lengthscales=[0.3])
+                        else:
+                            k_space = gp.kernels.RBF(2,active_dims = [0,1],lengthscales=[init[0]/d_scale])
+                            k_space.lengthscales.set_trainable(False)
+                        if init[1] is None:
+                            k_time = gp.kernels.RBF(1,active_dims = [2],lengthscales=[0.3])
+                        else:
+                            k_time = gp.kernels.RBF(1,active_dims = [2],lengthscales=[init[1]/t_scale])
+                            k_time.lengthscales.set_trainable(False)
+
+                        k_freq = gp.kernels.RBF(1,active_dims = [3], lengthscales=[10.])
                         
                         #k_white = gp.kernels.White(4)
                         kern = k_space * k_time * k_freq# + k_white
@@ -95,7 +150,7 @@ class Smoothing(object):
 
                         m = gp.models.svgp.SVGP(X, y, kern, mean_function = mean, 
                                 likelihood=Gaussian_v2(Y_var=var, trainable=False), 
-                                Z=Z, num_latent=1, minibatch_size=100, whiten=True)
+                                Z=Z, num_latent=1, minibatch_size=500, whiten=True)
                         m.feature.set_trainable(False)
                         m.kern.rbf_1.lengthscales.prior = gp.priors.Gaussian(1./d_scale,0.5/d_scale)
                         m.kern.rbf_2.lengthscales.prior = gp.priors.Gaussian(0,1./3.)
@@ -103,8 +158,8 @@ class Smoothing(object):
                         m.compile()
                 finally:
                     lock.release()
-                iterations=150
-                gp.train.AdamOptimizer(0.1).minimize(m, maxiter=iterations)
+                iterations=1000
+                gp.train.AdamOptimizer(0.01).minimize(m, maxiter=iterations)
                 
                 if verbose:
                     logging.warning(m)
@@ -203,71 +258,42 @@ class Smoothing(object):
     def _ref_distance(self,antennas,i0=0):
         x = antennas.x.to(au.km).value
         y = antennas.y.to(au.km).value
-        z = antennas.z.to(au.km).value
+        z = antennas.z.to(au.km).value61
         dist = np.sqrt((x-x[i0])**2 + (y-y[i0])**2 + (z-z[i0])**2)
         return dist
 
     def refine_statistics_timeonly(self,results_file):
+        plt.style.use('ggplot')
         antennas,antenna_labels = self.datapack.get_antennas(-1)
         data = np.load(results_file)
-        length_scales = data['kern_ls']
-        length_scales -= length_scales.mean(0).mean(0)
-        length_scales /= length_scales.std(0).std(0)
-        var_scale = data['kern_var']
+        # antenna, time
+        length_scales = data['kern_ls'][:,:,0]
+        y_mean = length_scales.mean()
+        y_std = length_scales.std()
+
         times = data['time']
-        times -= times.mean()
-        times /= times.std()
+        time_mean = times.mean()
+        time_std = times.std()
+
         labels = data['antenna']
         array_center = ac.ITRS(np.mean(antennas.data))
         enu = ENU(location = array_center)
         ants_enu = antennas.transform_to(enu)
         positions = np.array([ants_enu.east.to(au.km).value[1:], ants_enu.north.to(au.km).value[1:]]).T
-        positions -= positions.mean(0)
-        positions /= positions.std(0).mean()
+        pos_mean = positions.mean(0)
+        positions -= pos_mean
+        pos_std = positions.std(0).mean()
+        positions /= pos_std
 
         Nt,Np = times.shape[0],positions.shape[0]
-        X = np.zeros([Nt,Np,1],dtype=np.float64)
+        X = np.zeros([Np,Nt,1],dtype=np.float64)
         for j in range(Nt):
             for k in range(Np):
-                X[j,k,0] = times[j]
-             #   X[j,k,1:3] = positions[k,:]   
+                X[k,j,0] = (times[j] - time_mean)/time_std
+#                X[j,k,1:3] = positions[k,:]   
         X = np.reshape(X,(Nt*Np,1))
-        Y = length_scales[:,:,0:1].transpose([1,0,2]).reshape((-1,1))
-
-        M = 100
-        Z = kmeans2(X, M, minit='points')[0]
-
-        with tf.Session(graph=tf.Graph()) as sess:
-            with gp.defer_build():
-                #k_space = gp.kernels.RBF(2,active_dims = [1,2],lengthscales=[0.5])
-                k_time = gp.kernels.RBF(1,active_dims = [0],lengthscales=[0.5])
-                k_white = gp.kernels.White(1,variance=1e-5)
-                kern = k_time  + k_white
-                mean = gp.mean_functions.Constant()
-
-                m = gp.models.svgp.SVGP(X, Y, kern, mean_function = mean, 
-                        likelihood=gp.likelihoods.Gaussian(), 
-                        Z=Z, num_latent=1, minibatch_size=500, whiten=True)
-                m.feature.set_trainable(False)
-                k_time.lengthscales.prior = gp.priors.Gaussian(0,1/3.)
-                m.compile()
-            iterations=1000
-            gp.train.AdamOptimizer(0.01).minimize(m, maxiter=iterations)
-            print(m)
-            xi = np.linspace(np.min(positions),np.max(positions),100)
-            yi = np.linspace(np.min(positions),np.max(positions),100)
-            y,var = m.predict_y(X)
-            y = y.reshape((Nt,Np,1))
-            std = np.sqrt(var.reshape((Nt,Np,1)))
-            fig,(ax1,ax2) = plt.subplots(nrows=1,ncols=2)
-            [ax1.plot(times,y[:,i,0]) for i in range(y.shape[1])]
-            ax1.plot(times,length_scales[:,:,0].mean(0),lw=2,c='black')
-            ax1.fill_between(times,y[:,0,0]
-            ax1.fill_between(times,length_scales[:,:,0].mean(0)+length_scales[:,:,0].std(0),length_scales[:,:,0].mean(0)-length_scales[:,:,0].std(0),alpha=0.25)
-            [ax2.plot(times,length_scales[i,:,0]) for i in range(y.shape[1])]
-            plt.show()
-
-        Y = length_scales[:,:,1:2].transpose([1,0,2]).reshape((-1,1))
+        Xs = (times[:,None]-time_mean)/time_std
+        Y = (length_scales.reshape((-1,1)) - y_mean)/y_std
 
         M = 100
         Z = kmeans2(X, M, minit='points')[0]
@@ -275,172 +301,247 @@ class Smoothing(object):
         with tf.Session(graph=tf.Graph()) as sess:
             with gp.defer_build():
                 k_time = gp.kernels.RBF(1,active_dims = [0],lengthscales=[0.5])
-                k_white = gp.kernels.White(1,variance=1e-5)
-                kern = k_time  + k_white
-                mean = gp.mean_functions.Constant()
-
+                kern = k_time                
+                mean = gp.mean_functions.Zero()#Constant()
                 m = gp.models.svgp.SVGP(X, Y, kern, mean_function = mean, 
                         likelihood=gp.likelihoods.Gaussian(), 
                         Z=Z, num_latent=1, minibatch_size=500, whiten=True)
                 m.feature.set_trainable(False)
                 k_time.lengthscales.prior = gp.priors.Gaussian(0,1/3.)
+                m.likelihood.prior = gp.priors.Gaussian(0,1/3.)
                 m.compile()
             iterations=1000
             gp.train.AdamOptimizer(0.01).minimize(m, maxiter=iterations)
             print(m)
-            xi = np.linspace(np.min(positions),np.max(positions),100)
-            yi = np.linspace(np.min(positions),np.max(positions),100)
-            y,var = m.predict_y(X)
-            y = y.reshape((Nt,Np,1))
-            std = np.sqrt(var.reshape((Nt,Np,1)))
-            fig,(ax1,ax2) = plt.subplots(nrows=1,ncols=2)
-            [ax1.plot(times,y[:,i,0]) for i in range(y.shape[1])]
-            ax1.plot(times,length_scales[:,:,1].mean(0),lw=2,c='black')
-            ax1.fill_between(times,length_scales[:,:,1].mean(0)+length_scales[:,:,1].std(0),length_scales[:,:,1].mean(0)-length_scales[:,:,1].std(0),alpha=0.25)
-            [ax2.plot(times,length_scales[i,:,1]) for i in range(y.shape[1])]
+            y,var = m.predict_y(Xs)
+            y = y*y_std + y_mean
+            y = y.reshape((Nt,1))
+            var = var*y_std**2
+            std = np.sqrt(var).reshape((Nt,1))
+
+            fig,ax = plt.subplots(nrows=1,ncols=1,figsize=(8,8))
+            [ax.scatter(times,length_scales[i,:],marker='+',c='black',alpha=0.15) for i in range(length_scales.shape[0])]
+            ax.plot(times,length_scales.mean(0),lw=2,ls='--',color='red',label='antenna average')
+            ax.plot(times,y[:,0],color='blue',label='Bayes')
+            ax.fill_between(times,y[:,0]+std[:,0],y[:,0]-std[:,0],alpha=0.25,color='blue')
+            ax.set_ylim([0.25,2.75])
+            ax.set_xlabel('Time (mjd)')
+            ax.set_ylabel('Phase screen directional correlation scale (deg)')
+            ax.legend()
             plt.show()
+            # antenna, time, 1
+            l_space = y.copy()
 
-        return
+        # antenna, time
+        length_scales = data['kern_ls'][:,:,1]
+        y_mean = length_scales.mean()
+        y_std = length_scales.std()
 
+        times = data['time']
+        time_mean = times.mean()
+        time_std = times.std()
 
+        labels = data['antenna']
+        array_center = ac.ITRS(np.mean(antennas.data))
+        enu = ENU(location = array_center)
+        ants_enu = antennas.transform_to(enu)
+        positions = np.array([ants_enu.east.to(au.km).value[1:], ants_enu.north.to(au.km).value[1:]]).T
+        pos_mean = positions.mean(0)
+        positions -= pos_mean
+        pos_std = positions.std(0).mean()
+        positions /= pos_std
 
+        Nt,Np = times.shape[0],positions.shape[0]
+        X = np.zeros([Np,Nt,1],dtype=np.float64)
+        for j in range(Nt):
+            for k in range(Np):
+                X[k,j,0] = (times[j] - time_mean)/time_std
+#                X[j,k,1:3] = positions[k,:]   
+        X = np.reshape(X,(Nt*Np,1))
+        Xs = (times[:,None] - time_mean)/time_std
+        Y = (length_scales.reshape((-1,1)) - y_mean)/y_std
+
+        M = 100
+        Z = kmeans2(X, M, minit='points')[0]
+
+        with tf.Session(graph=tf.Graph()) as sess:
+            with gp.defer_build():
+                k_time = gp.kernels.RBF(1,active_dims = [0],lengthscales=[0.5])
+                kern = k_time                
+                mean = gp.mean_functions.Zero()#Constant()
+                m = gp.models.svgp.SVGP(X, Y, kern, mean_function = mean, 
+                        likelihood=gp.likelihoods.Gaussian(), 
+                        Z=Z, num_latent=1, minibatch_size=500, whiten=True)
+                m.feature.set_trainable(False)
+                k_time.lengthscales.prior = gp.priors.Gaussian(0,1/3.)
+                m.likelihood.prior = gp.priors.Gaussian(0,1/3.)
+                m.compile()
+            iterations=1000
+            gp.train.AdamOptimizer(0.01).minimize(m, maxiter=iterations)
+            print(m)
+            y,var = m.predict_y(Xs)
+            y = y*y_std + y_mean
+            y = y.reshape((Nt,1))
+            var = var*y_std**2
+            std = np.sqrt(var).reshape((Nt,1))
+
+            fig,ax = plt.subplots(nrows=1,ncols=1,figsize=(8,8))
+            [ax.scatter(times,length_scales[i,:],marker='+',c='black',alpha=0.15) for i in range(length_scales.shape[0])]
+            ax.plot(times,length_scales.mean(0),lw=2,ls='--',color='red',label='antenna average')
+            ax.plot(times,y[:,0],color='blue',label='Bayes')
+            ax.fill_between(times,y[:,0]+std[:,0],y[:,0]-std[:,0],alpha=0.25,color='blue')
+            ax.set_ylim([0.,700.])
+            ax.set_xlabel('Time (mjd)')
+            ax.set_ylabel('Phase screen temporal correlation scale (seconds)')
+            ax.legend()
+            plt.show()
+            # antenna, time, 1
+            l_time = y.copy()
+
+        return np.concatenate([l_space,l_time],axis=-1)
 
     def refine_statistics(self,results_file):
-        from scipy.interpolate import griddata        
-        #radio_array = RadioArray(array_file=RadioArray.lofar_array)
+        plt.style.use('ggplot')
         antennas,antenna_labels = self.datapack.get_antennas(-1)
         data = np.load(results_file)
-        length_scales = data['kern_ls']
-        length_scales -= length_scales.mean(0).mean(0)
-        length_scales /= length_scales.std(0).std(0)
-        var_scale = data['kern_var']
+        # antenna, time
+        length_scales = data['kern_ls'][:,:,0]
+        y_mean = length_scales.mean()
+        y_std = length_scales.std()
+
         times = data['time']
-        times -= times.mean()
-        times /= times.std()
+        time_mean = times.mean()
+        time_std = times.std()
+
         labels = data['antenna']
         array_center = ac.ITRS(np.mean(antennas.data))
         enu = ENU(location = array_center)
         ants_enu = antennas.transform_to(enu)
         positions = np.array([ants_enu.east.to(au.km).value[1:], ants_enu.north.to(au.km).value[1:]]).T
-        positions -= positions.mean(0)
-        positions /= positions.std(0).mean()
+        pos_mean = positions.mean(0)
+        positions -= pos_mean
+        pos_std = positions.std(0).mean()
+        positions /= pos_std
 
         Nt,Np = times.shape[0],positions.shape[0]
-        X = np.zeros([Nt,Np,3],dtype=np.float64)
+        X = np.zeros([Np,Nt,3],dtype=np.float64)
         for j in range(Nt):
             for k in range(Np):
-                X[j,k,0] = times[j]
-                X[j,k,1:3] = positions[k,:]   
+                X[k,j,0] = (times[j] - time_mean)/time_std
+                X[k,j,1:3] = positions[k,:]   
         X = np.reshape(X,(Nt*Np,3))
-        Y = length_scales[:,:,0:1].transpose([1,0,2]).reshape((-1,1))
+        Y = (length_scales.reshape((-1,1)) - y_mean)/y_std
 
         M = 100
         Z = kmeans2(X, M, minit='points')[0]
 
         with tf.Session(graph=tf.Graph()) as sess:
             with gp.defer_build():
-                k_space = gp.kernels.RBF(2,active_dims = [1,2],lengthscales=[0.5])
                 k_time = gp.kernels.RBF(1,active_dims = [0],lengthscales=[0.5])
-                k_white = gp.kernels.White(3,variance=1e-5)
-                kern = k_time * k_space + k_white
-                mean = gp.mean_functions.Constant()
-
+                k_space = gp.kernels.RBF(2,active_dims = [1,2],lengthscales=[0.5])
+                kern = k_time*k_space                
+                mean = gp.mean_functions.Zero()#Constant()
                 m = gp.models.svgp.SVGP(X, Y, kern, mean_function = mean, 
                         likelihood=gp.likelihoods.Gaussian(), 
                         Z=Z, num_latent=1, minibatch_size=500, whiten=True)
                 m.feature.set_trainable(False)
-                k_space.lengthscales.prior = gp.priors.Gaussian(0,1./3.)
                 k_time.lengthscales.prior = gp.priors.Gaussian(0,1/3.)
+                k_space.lengthscales.prior = gp.priors.Gaussian(0,1/3.)
+                m.likelihood.prior = gp.priors.Gaussian(0,1/3.)
                 m.compile()
-            iterations=1000
+            iterations=2000
             gp.train.AdamOptimizer(0.01).minimize(m, maxiter=iterations)
             print(m)
-            xi = np.linspace(np.min(positions),np.max(positions),100)
-            yi = np.linspace(np.min(positions),np.max(positions),100)
             y,var = m.predict_y(X)
-            y = y.reshape((Nt,Np,1))
-            std = np.sqrt(var.reshape((Nt,Np,1)))
-            fig,(ax1,ax2) = plt.subplots(nrows=1,ncols=2)
-            [ax1.plot(times,y[:,i,0]) for i in range(y.shape[1])]
-            ax1.plot(times,length_scales[:,:,0].mean(0),lw=2,c='black')
-            ax1.fill_between(times,length_scales[:,:,0].mean(0)+length_scales[:,:,0].std(0),length_scales[:,:,0].mean(0)-length_scales[:,:,0].std(0),alpha=0.25)
-            [ax2.plot(times,length_scales[i,:,0]) for i in range(y.shape[1])]
+            y = y*y_std + y_mean
+            y = y.reshape((Np,Nt,1))
+            var = var*y_std**2
+            std = np.sqrt(var).reshape((Np,Nt,1))
+
+            fig,ax = plt.subplots(nrows=1,ncols=1,figsize=(8,8))
+            [ax.scatter(times,length_scales[i,:],marker='+',c='black',alpha=0.15) for i in range(y.shape[0])]
+            [ax.plot(times,y[i,:,0],color='blue',lw = 2.,label='Bayes'if i == 0 else None,alpha=0.5) for i in range(61)]
+#            [ax.fill_between(times,y[i,:,0]+0.5*std[i,:,0],y[i,:,0]-0.5*std[i,:,0],alpha=0.1,color='blue',label='Bayes'if i == 0 else None) for i in range(61)]
+            ax.plot(times,length_scales.mean(0),lw=2,ls='--',color='red',label='antenna average')
+            #ax.fill_between(times,y[0,:,0]+std[0,:,0],y[0,:,0]-std[0,:,0],alpha=0.25,color='blue')
+            ax.set_ylim([0.25,2.75])
+            ax.set_xlabel('Time (mjd)')
+            ax.set_ylabel('Phase screen directional correlation scale (deg)')
+            ax.legend()
             plt.show()
 
-        Y = length_scales[:,:,1:2].transpose([1,0,2]).reshape((-1,1))
+        # antenna, time
+        length_scales = data['kern_ls'][:,:,1]
+        y_mean = length_scales.mean()
+        y_std = length_scales.std()
+
+        times = data['time']
+        time_mean = times.mean()
+        time_std = times.std()
+
+        labels = data['antenna']
+        array_center = ac.ITRS(np.mean(antennas.data))
+        enu = ENU(location = array_center)
+        ants_enu = antennas.transform_to(enu)
+        positions = np.array([ants_enu.east.to(au.km).value[1:], ants_enu.north.to(au.km).value[1:]]).T
+        pos_mean = positions.mean(0)
+        positions -= pos_mean
+        pos_std = positions.std(0).mean()
+        positions /= pos_std
+
+        Nt,Np = times.shape[0],positions.shape[0]
+        X = np.zeros([Np,Nt,3],dtype=np.float64)
+        for j in range(Nt):
+            for k in range(Np):
+                X[k,j,0] = (times[j] - time_mean)/time_std
+                X[k,j,1:3] = positions[k,:]   
+        X = np.reshape(X,(Nt*Np,3))
+        Y = (length_scales.reshape((-1,1)) - y_mean)/y_std
 
         M = 100
         Z = kmeans2(X, M, minit='points')[0]
 
         with tf.Session(graph=tf.Graph()) as sess:
             with gp.defer_build():
-                k_space = gp.kernels.RBF(2,active_dims = [1,2],lengthscales=[0.5])
                 k_time = gp.kernels.RBF(1,active_dims = [0],lengthscales=[0.5])
-                k_white = gp.kernels.White(3,variance=1e-5)
-                kern = k_time * k_space + k_white
-                mean = gp.mean_functions.Constant()
-
+                k_space = gp.kernels.RBF(2,active_dims = [1,2],lengthscales=[0.5])
+                kern = k_time*k_space             
+                mean = gp.mean_functions.Zero()#Constant()
                 m = gp.models.svgp.SVGP(X, Y, kern, mean_function = mean, 
                         likelihood=gp.likelihoods.Gaussian(), 
                         Z=Z, num_latent=1, minibatch_size=500, whiten=True)
                 m.feature.set_trainable(False)
-                k_space.lengthscales.prior = gp.priors.Gaussian(0,1./3.)
                 k_time.lengthscales.prior = gp.priors.Gaussian(0,1/3.)
+                k_space.lengthscales.prior = gp.priors.Gaussian(0,1/3.)
+                m.likelihood.prior = gp.priors.Gaussian(0,1/3.)
                 m.compile()
-            iterations=1000
+            iterations=2000
             gp.train.AdamOptimizer(0.01).minimize(m, maxiter=iterations)
             print(m)
-            xi = np.linspace(np.min(positions),np.max(positions),100)
-            yi = np.linspace(np.min(positions),np.max(positions),100)
             y,var = m.predict_y(X)
-            y = y.reshape((Nt,Np,1))
-            std = np.sqrt(var.reshape((Nt,Np,1)))
-            fig,(ax1,ax2) = plt.subplots(nrows=1,ncols=2)
-            [ax1.plot(times,y[:,i,0]) for i in range(y.shape[1])]
-            ax1.plot(times,length_scales[:,:,1].mean(0),lw=2,c='black')
-            ax1.fill_between(times,length_scales[:,:,1].mean(0)+length_scales[:,:,1].std(0),length_scales[:,:,1].mean(0)-length_scales[:,:,1].std(0),alpha=0.25)
-            [ax2.plot(times,length_scales[i,:,1]) for i in range(y.shape[1])]
+            y = y*y_std + y_mean
+            y = y.reshape((Np,Nt,1))
+            var = var*y_std**2
+            std = np.sqrt(var).reshape((Np,Nt,1))
+
+            fig,ax = plt.subplots(nrows=1,ncols=1,figsize=(8,8))
+            [ax.scatter(times,length_scales[i,:],marker='+',c='black',alpha=0.15) for i in range(y.shape[0])]
+            
+            [ax.plot(times,y[i,:,0],color='blue',lw = 2.,label='Bayes'if i == 0 else None,alpha=0.5) for i in range(61)]
+#            [ax.fill_between(times,y[i,:,0]+0.5*std[i,:,0],y[i,:,0]-0.5*std[i,:,0],alpha=0.1,color='blue',label='Bayes'if i == 0 else None) for i in range(61)]
+            ax.plot(times,length_scales.mean(0),lw=2,ls='--',color='red',label='antenna average')
+            #ax.fill_between(times,y[0,:,0]+std[0,:,0],y[0,:,0]-std[0,:,0],alpha=0.25,color='blue')
+            ax.set_ylim([0.,700.])
+            ax.set_xlabel('Time (mjd)')
+            ax.set_ylabel('Phase screen temporal correlation scale (seconds)')
+            ax.legend()
             plt.show()
 
         return
 
 
-
-
-        
-        # grid the data.
-        zi = griddata((positions[:,0], positions[:,1]), np.log10(length_scales[:,0,0]), (xi[None,:], yi[:,None]), method='cubic')
-        plt.ion()
-        # contour the gridded data, plotting dots at the randomly spaced data points.
-        fig,ax = plt.subplots(1,1)
-        plt.show()
-        i = 0
-        vmin = np.min(length_scales[:,:,0])
-        vmax = np.max(length_scales[:,:,0])
-        set = False
-        while True:
-            idx = i % len(times)
-            zi = griddata((positions[:,0], positions[:,1]), (length_scales[:,idx,0]), (xi[None,:], yi[:,None]), method='nearest')
-            ax.cla()
-            CS1 = ax.contour(xi,yi,zi,15,linewidths=0.5,colors='k')
-            CS2 = ax.contourf(xi,yi,zi,15,cmap=plt.cm.jet,vmin=vmin,vmax=vmax)
-            if not set:
-                plt.colorbar(CS2) # draw colorbar
-                set = True
-            # plot data points.
-            plt.scatter(positions[:,0],positions[:,1],marker='o',c='b',s=5)
-            plt.title(times[idx])
-            fig.canvas.draw()
-            i += 1
-        plt.ioff()
-
-#        plt.xlim(-2,2)
-#        plt.ylim(-2,2)
-#        plt.title('griddata test (%d points)' % npts)
-        #plt.show()
-
-
-    def solve_time_intervals(self, save_file, ant_idx, time_idx, dir_idx, freq_idx, interval, shift, num_threads=1,verbose=False):
+    
+    def solve_time_intervals(self, save_file, ant_idx, time_idx, dir_idx, freq_idx, interval, shift, num_threads=1,verbose=False, refined_params = None):
         """
         Solve for kernel characteristics over given domain.
         ant_idx, time_idx, dir_idx, freq_idx: the domain selectors
@@ -503,6 +604,11 @@ class Smoothing(object):
                     start = j*shift
                     stop = min(start+interval,Nt)
                     time_slice = slice(start,stop,time_sampling)
+
+                    if refined_params is not None:
+                        init = refined_params[j,:]
+                    else:
+                        init = [None,None]
                     
                     jobs.append(executor.submit(
                         Smoothing._solve_block_svgp,
@@ -510,6 +616,7 @@ class Smoothing(object):
                         error[i,time_slice,directional_slice,freq_slice],
                         (t[time_slice],d[directional_slice],f[freq_slice]),
                         lock,
+                        init=init,
                         pargs="Working on {} time chunk ({}) {} to ({}) {}".format(antenna_labels[i],
                             start,timestamps[start],stop-1,timestamps[stop-1]),
                         verbose=verbose
@@ -553,4 +660,6 @@ if __name__=='__main__':
         starting_datapack = "../data/rvw_datapack_full_phase_dec27.hdf5"
     smoothing = Smoothing(starting_datapack)
     #smoothing.solve_time_intervals("gp_params.npz",range(1,62),-1,-1,range(0,20),32,32,num_threads=16,verbose=True)
-    smoothing.refine_statistics_timeonly('gp_params.npz')
+    refined_params = smoothing.refine_statistics_timeonly('gp_params.npz')
+    print(refined_params.shape)
+    smoothing.solve_time_intervals("gp_params_fixed_scales.npz",range(1,62),-1,-1,range(0,20),32,32,num_threads=16,verbose=True,refined_params=refined_params)
