@@ -815,12 +815,13 @@ class Smoothing(object):
             var = var.flatten()
             
             t,d,f = coords
+            assert len(t) == Nt and len(d) == Nd and len(f) == Nf
             t_scale = np.max(t) - np.min(t) + 1e-6
             d_scale = np.std(d - np.mean(d,axis=0),axis=0).mean() + 1e-6
             f_scale = np.max(f) - np.min(f) + 1e-6
-            t = (t - np.mean(t))/(t_scale+1e-6)
-            d = (d - np.mean(d,axis=0))/(d_scale+1e-6)
-            f = (f - np.mean(f))/(f_scale+1e-6)
+            t = (t - np.mean(t))/(t_scale)
+            d = (d - np.mean(d,axis=0))/(d_scale)
+            f = (f - np.mean(f))/(f_scale)
             X = Smoothing._make_coord_array(t,d,f)
 
             M = 100
@@ -836,7 +837,6 @@ class Smoothing(object):
                         k_time.lengthscales.set_trainable(False)
                         k_freq = gp.kernels.RBF(1,active_dims = [3], lengthscales=[kern_params[2]/f_scale])
                         k_freq.lengthscales.set_trainable(False)
-                        var = m.kern.rbf_1.variance.value*m.kern.rbf_2.variance.value*m.kern.rbf_3.variance.value*y_scale**2
                         ## just set k_space, rest to 1.0
                         k_space.variance = kern_params[3]
                         k_space.variance.set_trainable(False)
@@ -865,8 +865,12 @@ class Smoothing(object):
                     logging.warning(m)
 
                 for l,fs in enumerate(f):
-                    X = Smoothing._make_coord_array(t,d,[fs])
+                    if verbose:
+                        logging.warning("Predicting freq {} MHz".format(coords[2][l]/1e6))
+                    Xs = Smoothing._make_coord_array(t,d,np.array([fs]))
+                    logging.warning("{}".format(Xs.shape))
                     ystar,varstar = m.predict_y(Xs)
+                    logging.warning("{} {}".format(ystar.shape,varstar.shape))
                     ystar = ystar.reshape([Nt,Nd,1]) * y_scale + y_mean
                     varstar = varstar.reshape([Nt,Nd,1]) * y_scale**2
 
@@ -884,7 +888,7 @@ class Smoothing(object):
 
 
     def apply_solutions(self, save_datapack, solution_params, ant_idx, time_idx, dir_idx, freq_idx, interval, shift, num_threads=1,verbose=False):
-        data = np.load(results_file)
+        data = np.load(solution_params)
 
         kern_ls = data['kern_ls']
         kern_var = data['kern_var']
@@ -931,7 +935,7 @@ class Smoothing(object):
         time_sampling = 1
         freq_sampling = 1
         directional_slice = slice(0,Nd,directional_sampling)
-        #freq_slice = slice(0,Nf,freq_sampling)
+        freq_slice = slice(0,Nf,freq_sampling)
 
         lock = Lock()
 
@@ -947,7 +951,7 @@ class Smoothing(object):
 
                     ###
                     # interpolate kern_params with this interval/shift
-                    mean_time = np.mean(times[time_slice])
+                    mean_time = np.mean(times.gps[time_slice])
                     
                     # d, t, f, v
                     kern_params = [
@@ -969,8 +973,8 @@ class Smoothing(object):
                         (t[time_slice],d[directional_slice],f[freq_slice]),
                         lock,
                         kern_params=kern_params,
-                        pargs="Working on {} time chunk ({}) {} to ({}) {} at ({}) {} MHz".format(antenna_labels[i],
-                            start,timestamps[start],stop-1,timestamps[stop-1], l, freqs[l]/1e6),
+                        pargs="Working on {} time chunk ({}) {} to ({}) {} at {} to {} MHz".format(antenna_labels[i],
+                            start,timestamps[start],stop-1,timestamps[stop-1], freqs[0]/1e6, freqs[-1]/1e6),
                         verbose=verbose
                         )
                         )
@@ -1010,11 +1014,11 @@ if __name__=='__main__':
 #    refined_params = smoothing.refine_statistics_timeonly('gp_params.npz')
 #    print(refined_params.shape)
 #    smoothing.solve_time_intervals("gp_params_fixed_scales.npz",range(1,62),-1,-1,range(0,20),32,32,num_threads=16,verbose=True,refined_params=refined_params)
-    plt.ion()
-    smoothing.refine_statistics_timeonly('gp_params.npz')
-    smoothing.refine_statistics('gp_params.npz')
-    smoothing.refine_statistics_timeonly('gp_params_fixed_scales.npz')
-    smoothing.refine_statistics('gp_params_fixed_scales.npz')
-    plt.ioff()
-#    smoothing.apply_solutions(starting_datapack.replace('.hdf5','_refined_smoothed.hdf5'), 
-#            "gp_params_fixed_scales.npz",range(1,62), -1, -1, range(0,20), 32, 32, num_threads=16,verbose=True)
+#    plt.ion()
+#    smoothing.refine_statistics_timeonly('gp_params.npz')
+#    smoothing.refine_statistics('gp_params.npz')
+#    smoothing.refine_statistics_timeonly('gp_params_fixed_scales.npz')
+#    smoothing.refine_statistics('gp_params_fixed_scales.npz')
+#    plt.ioff()
+    smoothing.apply_solutions(starting_datapack.replace('.hdf5','_refined_smoothed.hdf5'), 
+            "gp_params_fixed_scales.npz",range(1,62), -1, -1, range(0,20), 32, 32, num_threads=1,verbose=True)

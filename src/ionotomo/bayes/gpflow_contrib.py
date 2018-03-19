@@ -14,7 +14,7 @@ from gpflow.likelihoods import Likelihood
 from gpflow.models import GPModel
 
 class Gaussian_v2(Likelihood):
-    def __init__(self, Y_var=None,var=1.0, trainable=True):
+    def __init__(self, Y_var=None,var=1.0, trainable=True,minibatch_size=None):
         super().__init__()
         self.variance = Parameter(
                 var, transform=transforms.positive, dtype=settings.float_type, trainable=trainable)
@@ -22,11 +22,20 @@ class Gaussian_v2(Likelihood):
         if Y_var is None:
             self.relative_variance = 1.0
         else:
-            self.relative_variance = Y_var
+            if minibatch_size is None:
+                self.relative_variance = DataHolder(Y_var[:,None]+1e-3)
+            else:
+                self.relative_variance = Minibatch(Y_var[:,None]+1e-3, batch_size=minibatch_size, shuffle=True, seed=0)
+
 
     @params_as_tensors
     def logp(self, F, Y):
-        return densities.gaussian(F, Y, self.relative_variance*self.variance)
+        if self.relative_variance == 1.0:
+            return densities.gaussian(F, Y, self.variance)
+        else:
+            # var should be [:,1]
+            return densities.gaussian(F, Y, self.variance*self.relative_variance)
+
 
     @params_as_tensors
     def conditional_mean(self, F):  # pylint: disable=R0201
@@ -34,7 +43,8 @@ class Gaussian_v2(Likelihood):
 
     @params_as_tensors
     def conditional_variance(self, F):
-        return tf.fill(tf.shape(F), tf.squeeze(self.relative_variance*self.variance))
+        return self.relative_variance*self.variance
+        #return tf.fill(tf.shape(F), tf.squeeze(self.relative_variance*self.variance))
 
     @params_as_tensors
     def predict_mean_and_var(self, Fmu, Fvar):
@@ -239,8 +249,8 @@ def test_svgp():
 
     np.random.seed(0)
     X = np.linspace(0,1,10000)[:,None]
-    sigma_y = np.random.uniform(size=10000)*0.5
-    #sigma_y[sigma_y < 0.5] = 0.01
+    sigma_y = np.random.uniform(size=10000)
+    sigma_y[sigma_y < 0.5] = 0.01
     #sigma_y = 0.5*np.ones([100])
     #sigma_y[50:] = 0.
     F = np.exp(-X)*np.sin(50*X) + X**2*np.sin(10*X)
@@ -253,13 +263,13 @@ def test_svgp():
     M = 100
     Z = kmeans2(X, M, minit='points')[0]
     with gp.defer_build():
-        m_sgp = SVGP(X, Y, RBF(1, lengthscales=0.05, variance=1.)*gp.kernels.Periodic(1), Gaussian_v2(Y_var=sigma_y**2, trainable=False), 
+        m_sgp = SVGP(X, Y, RBF(1, lengthscales=0.05, variance=1.)*gp.kernels.Periodic(1), Gaussian_v2(Y_var=sigma_y**2+1e-3, trainable=False, minibatch_size=100), 
              Z=Z, num_latent=1, minibatch_size=100, whiten=True)
         m_sgp.feature.set_trainable(False)
         #m_sgp.kern.lengthscales.prior = gp.priors.Gaussian(0,0.3)
         m_sgp.compile()
     iterations = 1000
-    AdamOptimizer(0.1).minimize(m_sgp, maxiter=iterationsy)
+    AdamOptimizer(0.1).minimize(m_sgp, maxiter=iterations)
 
     def assess_model_sgp(model, X_batch, Y_batch):
         m, v = model.predict_y(X_batch)
