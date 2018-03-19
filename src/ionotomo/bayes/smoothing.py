@@ -39,23 +39,19 @@ class Smoothing(object):
             datapack = DataPack(filename=datapack)
         self.datapack = datapack
 
-#    def _make_coord_array(t,d,f):
-#        """Static method to pack coordinates
-#        """
-#        Nt,Nd,Nf = t.shape[0],d.shape[0], f.shape[0]
-#        X = np.zeros([Nt,Nd,Nf,4],dtype=np.float64)
-#        for j in range(Nt):
-#            for k in range(Nd):
-#                for l in range(Nf):
-#                    X[j,k,l,0:2] = d[k,:]
-#                    X[j,k,l,2] = t[j]   
-#                    X[j,k,l,3] = f[l]
-#        X = np.reshape(X,(Nt*Nd*Nf,4))
-#        return X
-
-    def _make_coord_array(*ars):
-        coords = np.meshgrid(*args,indexing='ij')
-        return np.stack([c.flatten() for c in coords],axis=1)
+    def _make_coord_array(t,d,f):
+        """Static method to pack coordinates
+        """
+        Nt,Nd,Nf = t.shape[0],d.shape[0], f.shape[0]
+        X = np.zeros([Nt,Nd,Nf,4],dtype=np.float64)
+        for j in range(Nt):
+            for k in range(Nd):
+                for l in range(Nf):
+                    X[j,k,l,0:2] = d[k,:]
+                    X[j,k,l,2] = t[j]   
+                    X[j,k,l,3] = f[l]
+        X = np.reshape(X,(Nt*Nd*Nf,4))
+        return X
 
     def _solve_svgp(coords, data, var=None, M = 100, minibatch_size=500, iterations=1000, ARD=True, lock = None):
         assert len(coords) == len(data.shape)-1
@@ -135,11 +131,13 @@ class Smoothing(object):
                             k_space = gp.kernels.RBF(2,active_dims = [0,1],lengthscales=[0.3])
                         else:
                             k_space = gp.kernels.RBF(2,active_dims = [0,1],lengthscales=[init[0]/d_scale])
+                            logging.warning('Using spatial scale: {}'.format(init[0]))
                             k_space.lengthscales.set_trainable(False)
                         if init[1] is None:
                             k_time = gp.kernels.RBF(1,active_dims = [2],lengthscales=[0.3])
                         else:
                             k_time = gp.kernels.RBF(1,active_dims = [2],lengthscales=[init[1]/t_scale])
+                            logging.warning('Using spatial scale: {}'.format(init[1]))
                             k_time.lengthscales.set_trainable(False)
 
                         k_freq = gp.kernels.RBF(1,active_dims = [3], lengthscales=[10.])
@@ -150,7 +148,7 @@ class Smoothing(object):
 
                         m = gp.models.svgp.SVGP(X, y, kern, mean_function = mean, 
                                 likelihood=Gaussian_v2(Y_var=var, trainable=False), 
-                                Z=Z, num_latent=1, minibatch_size=500, whiten=True)
+                                Z=Z, num_latent=1, minibatch_size=100, whiten=True)
                         m.feature.set_trainable(False)
                         m.kern.rbf_1.lengthscales.prior = gp.priors.Gaussian(1./d_scale,0.5/d_scale)
                         m.kern.rbf_2.lengthscales.prior = gp.priors.Gaussian(0,1./3.)
@@ -158,8 +156,8 @@ class Smoothing(object):
                         m.compile()
                 finally:
                     lock.release()
-                iterations=1000
-                gp.train.AdamOptimizer(0.01).minimize(m, maxiter=iterations)
+                iterations=200
+                gp.train.AdamOptimizer(0.1).minimize(m, maxiter=iterations)
                 
                 if verbose:
                     logging.warning(m)
@@ -258,7 +256,7 @@ class Smoothing(object):
     def _ref_distance(self,antennas,i0=0):
         x = antennas.x.to(au.km).value
         y = antennas.y.to(au.km).value
-        z = antennas.z.to(au.km).value61
+        z = antennas.z.to(au.km).value
         dist = np.sqrt((x-x[i0])**2 + (y-y[i0])**2 + (z-z[i0])**2)
         return dist
 
