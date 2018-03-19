@@ -177,15 +177,17 @@ class DatapackPlotter(object):
         Nd = len(directions)
         Nf = len(freqs)
         fixfreq = freqs[Nf>>1]
+
+        antennas_, antenna_labels_ = self.datapack.get_antennas(ant_idx=-1)
         ref_ant_idx = None
         for i in range(Na):
-            if antenna_labels[i] == self.datapack.ref_ant:
+            if antenna_labels_[i] == self.datapack.ref_ant:
                 ref_ant_idx = i
 
         
         #ants_uvw = antennas.transform_to(uvw)
 
-        ref_dist = np.sqrt((antennas.x - antennas.x[ref_ant_idx])**2 + (antennas.y - antennas.y[ref_ant_idx])**2+ (antennas.z - antennas.z[ref_ant_idx])**2).to(au.km).value
+        ref_dist = np.sqrt((antennas.x - antennas_.x[ref_ant_idx])**2 + (antennas.y - antennas_.y[ref_ant_idx])**2+ (antennas.z - antennas_.z[ref_ant_idx])**2).to(au.km).value
         if labels_in_radec:
             ra = directions.ra.deg
             dec = directions.dec.deg
@@ -353,10 +355,10 @@ def test():
     datapack = generate_example_datapack(Ndir=10,Nant=10,Ntime=20)
     datapack.phase = np.random.uniform(size=datapack.phase.shape)
     dp = DatapackPlotter(datapack='../data/rvw_datapack_full_phase_dec27_smooth.hdf5')
-    dp.plot(ant_idx=-1,dir_idx=-1,time_idx=[0],labels_in_radec=True,show=True)
+    dp.plot(ant_idx=[50],dir_idx=-1,time_idx=[0],labels_in_radec=True,show=True)
 
-    animate_datapack('../data/rvw_datapack_full_phase_dec27_smooth.hdf5',
-            'test_output',num_processes=1,observable='phase',labels_in_radec=True,show=True)
+#    animate_datapack('../data/rvw_datapack_full_phase_dec27_smooth.hdf5',
+#            'test_output',num_processes=1,observable='phase',labels_in_radec=True,show=True)
 
 
 
