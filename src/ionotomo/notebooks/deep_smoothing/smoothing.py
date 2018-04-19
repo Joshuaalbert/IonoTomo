@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[1]:
+# In[74]:
 
 import numpy as np
 import tensorflow as tf
@@ -37,7 +37,7 @@ from scipy.spatial.distance import pdist,squareform
 import os
 
 
-# In[72]:
+# In[75]:
 
 class NNComposedKernel(gp.kernels.Kernel):
     """
@@ -75,25 +75,6 @@ class NNComposedKernel(gp.kernels.Kernel):
             X,_ = self._slice(X, None)
         return self.kern.Kdiag(self.f(X))
 
-class KernelSpaceInducingPoints(gp.features.InducingPoints):
-    def Kuf(self, kern, Xnew):
-        assert isinstance(kern, KernelWithNN)
-        return kern.K(self.Z, kern.f(Xnew))
-
-class NNComposedKernel_(KernelWithNN):
-    """
-    This kernel class applies f() to X before calculating K
-    """
-    
-    def K(self, X, X2=None, presliced=False):
-        if not presliced:
-            X, X2 = self._slice(X, X2)
-        return super().K(self.f(X), self.f(X2),presliced=True)
-    
-    def Kdiag(self, X, presliced=False):
-        if not presliced:
-            X = self._slice(X, None)
-        return super().Kdiag(self.f(X),presliced=True)
     
 # we need to add these extra functions to the model so the tensorflow variables get picked up
 class NN_SVGP(gp.models.svgp.SVGP):
@@ -641,7 +622,7 @@ class Smoothing(object):
             
 
             logging.warning("Initial log-likelihood {}".format(model.compute_log_likelihood()))
-            opt = gp.train.AdamOptimizer(1e-2)
+            opt = gp.train.AdamOptimizer(1e-3)
             opt.minimize(model, maxiter=iterations)
             logging.warning("Final log-likelihood {}".format(model.compute_log_likelihood()))
             f_vars = model.all_f_vars
@@ -701,10 +682,14 @@ class Smoothing(object):
             freq_idx = range(len(freqs))
         if dir_idx is -1:
             dir_idx = range(len(directions))
+        
 
         phase = datapack.get_phase(ant_idx,time_idx,dir_idx,freq_idx)
         Na,Nt,Nd,Nf = phase.shape
         logging.warning("Working on shapes {}".format(phase.shape))
+        
+        if interval is None:
+            interval = Nt
 
         assert interval <= Nt
 
@@ -747,22 +732,7 @@ class Smoothing(object):
 # (phase, error, coords, lock, error_sigma_clip=4., m_type='sgp', 
 #                         iterations=1000, pargs=None,verbose=False,model_kwargs={}):
                 model_file = os.path.join(self.proj_dir,"model_{}_{}".format(start,stop))
-                self._solve_interval_full(
-                    model_file,
-                    phase[:,time_slice,:,:],
-                    error[:,time_slice,:,:],
-                    (x, t[time_slice],d,f),
-                    lock,
-                    load_model = model_file,
-                    error_sigma_clip = None,
-                    m_type='sgp_full',
-                    iterations=iterations,
-                    pargs="Working on time chunk ({}) {} to ({}) {}".format(
-                        start,timestamps[start],stop-1,timestamps[stop-1]),
-                    verbose=verbose,
-                    model_kwargs = model_kwargs
-                    )
-                return
+
                 jobs.append(executor.submit(
                     self._solve_interval_full,
                     model_file,
@@ -813,11 +783,11 @@ if __name__=='__main__':
     else:
         starting_datapack = "../../data/rvw_datapack_full_phase_dec27_unwrap.hdf5"
     smoothing = Smoothing(starting_datapack,'projects')
-    model_kwargs = {'minibatch_size':500, 'M':40*15,'feature_trainable':False,'ls_init':(5.,70,0.3),
+    model_kwargs = {'minibatch_size':500, 'M':1000,'feature_trainable':False,'ls_init':(5.,70,0.3),
                          'ls_trainable':(True,True,True), 'verbose':False,'likelihood_var_trainable':True}
     smoothing.solve_and_apply_ensemble(starting_datapack.replace('.hdf5','_smoothed_ensemble.hdf5'),
-                                       range(5,7), -1, -1, range(2), iterations=10,
-                                 interval = 30, shift = 6, init_solutions='../../bayes/gp_params_fixed_scales.npz',
+                                       -1, -1, -1, -1, iterations=1000,
+                                 interval = None, shift = 6, init_solutions='../../bayes/gp_params_fixed_scales.npz',
                                        num_threads=1,verbose=True,model_kwargs = model_kwargs)
 
 # #     smoothing.solve_time_intervals("gp_params.npz",range(1,62),-1,-1,range(0,20),32,32,num_threads=16,verbose=True)
