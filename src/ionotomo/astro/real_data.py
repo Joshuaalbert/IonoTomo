@@ -566,6 +566,8 @@ def phase_screen_datapack(N,ant_idx=-1,time_idx=-1,dir_idx=-1,freq_idx=-1,Nant =
         datapack = generate_example_datapack(Nant = Nant, Ntime = Ntime, Ndir = 1, Nfreqs=Nfreqs,fov = fov, alt = alt, az=az, time = time, radio_array=radio_array)
     antennas,antenna_labels = datapack.get_antennas(ant_idx = ant_idx)
     times,timestamps = datapack.get_times(time_idx=time_idx)
+    
+
     freqs = datapack.get_freqs(freq_idx=freq_idx)
     Na = len(antennas)
     Nt = len(times)
@@ -583,6 +585,12 @@ def phase_screen_datapack(N,ant_idx=-1,time_idx=-1,dir_idx=-1,freq_idx=-1,Nant =
             dirs.append(dir)
     dirs = np.array(dirs)
     dirs = ac.SkyCoord(u = dirs[:,0], v = dirs[:,1], w = dirs[:,2],frame=uvw).transform_to(ac.ICRS)
+
+    directions,patch_names = datapack.get_directions(dir_idx=-1)
+    ra_range = np.linspace(directions.ra.deg.min(),directions.ra.deg.max(),N)
+    dec_range = np.linspace(directions.dec.deg.min(),directions.dec.deg.max(),N)
+    dirs = ac.SkyCoord(ra_range*au.dg, dec_range*au.deg,frame='icrs')
+
     patch_names = np.array(["facet_patch_{}".format(i) for i in range(len(dirs))])
     
 #    phase = np.random.normal(size=[Na,Nt,len(dirs)])
