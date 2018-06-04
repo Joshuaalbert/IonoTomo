@@ -589,7 +589,8 @@ def phase_screen_datapack(N,ant_idx=-1,time_idx=-1,dir_idx=-1,freq_idx=-1,Nant =
     directions,patch_names = datapack.get_directions(dir_idx=-1)
     ra_range = np.linspace(directions.ra.deg.min(),directions.ra.deg.max(),N)
     dec_range = np.linspace(directions.dec.deg.min(),directions.dec.deg.max(),N)
-    dirs = ac.SkyCoord(ra_range*au.dg, dec_range*au.deg,frame='icrs')
+    ra_range,dec_range = np.meshrig(ra_range, dec_range,indexing='ij')
+    dirs = ac.SkyCoord(ra_range.flatten()*au.deg, dec_range.flatten()*au.deg,frame='icrs')
 
     patch_names = np.array(["facet_patch_{}".format(i) for i in range(len(dirs))])
     
